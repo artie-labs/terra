@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: terra-postgres
+    restart: unless-stopped
+    environment:
+      # Admin/superuser password. Used only for you to administer the DB.
+      # This is NOT the account Artie uses (that's the 'artie' role in 03_artie.sql).
+      POSTGRES_PASSWORD: change-me-admin-password
+      POSTGRES_DB: terra
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"          # required for CDC — the #1 thing people forget
+      - "-c"
+      - "max_wal_senders=10"
+      - "-c"
+      - "max_replication_slots=10"
+      - "-c"
+      - "idle_in_transaction_session_timeout=86400000"  # 24h; matches Artie's guidance
+    ports:
+      - "5432:5432"                  # host:container — Artie connects to the host's 5432
+    volumes:
+      # Scripts here run ONCE, in filename order, the first time the volume is empty:
+      #   01_schema.sql  -> tables + enum
+      #   02_seed.sql    -> generated data (create it with generate_seed.py, see README)
+      #   03_artie.sql   -> artie role, grants, publication
+      - ./init:/docker-entrypoint-initdb.d:ro
+      - terra_pgdata:/var/lib/postgresql/data
+
+volumes:
+  terra_pgdata:
