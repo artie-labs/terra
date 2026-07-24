@@ -33,7 +33,7 @@ WATERING_HOLES = [
 ]
 
 SPECIES = [
-    "african_lion", "african_leopard", "african_elephant", "black_rhinoceros",
+    "lion", "leopard", "elephant", "black_rhinoceros",
     "african_buffalo", "cheetah", "giraffe", "plains_zebra", "hippopotamus",
     "blue_wildebeest", "spotted_hyena", "common_warthog", "ostrich", "impala",
     "african_wild_dog",
