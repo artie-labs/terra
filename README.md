@@ -37,5 +37,5 @@ Run Compose and seed commands from the dataset directory, for example:
 
 ```bash
 cd pg
-docker compose up -d
+docker compose -p terra up -d
 ```

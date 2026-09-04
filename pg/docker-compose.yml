@@ -30,3 +30,6 @@ services:
 
 volumes:
   terra_pgdata:
+    # Keep the root-layout volume name so existing local Terra data is reused
+    # after the source directories are reorganized.
+    name: terra_terra_pgdata
