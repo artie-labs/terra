@@ -1,0 +1,29 @@
+services:
+  mongo:
+    image: mongo:8.0
+    container_name: terra-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-change-me-admin-password}
+      MONGO_ARTIE_PASSWORD: ${MONGO_ARTIE_PASSWORD:-change-me-to-a-long-random-string}
+      MONGO_REPLICA_HOST: ${MONGO_REPLICA_HOST:-localhost:27017}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+      - ./init:/docker-entrypoint-initdb.d:ro
+      - ./seed:/seed:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet --host localhost -u artie -p \"$$MONGO_ARTIE_PASSWORD\" --authenticationDatabase admin terra --eval 'try { quit(db.runCommand({ find: \"animals\", limit: 1 }).ok === 1 ? 0 : 1) } catch (error) { quit(1) }'",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+volumes:
+  mongo_data:
