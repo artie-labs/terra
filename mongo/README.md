@@ -8,11 +8,9 @@ Terra's MongoDB dataset is a single-node replica set with a document-oriented sa
 mongo/
 ├── compose.yml
 ├── generate_seed.py
-├── seed/
-│   └── tiny.js
 ├── init/
 │   ├── 01_replica_set.sh
-│   ├── 02_seed.sh
+│   ├── 02_seed.js
 │   └── 03_artie_user.js
 ├── exercises.js
 └── workload.py
@@ -87,10 +85,10 @@ Standalone MongoDB and Amazon DocumentDB are excluded. This demo exercises the M
 
 ## Generate seed data
 
-The checked-in `seed/tiny.js` is the normal smoke fixture. Regenerate either deterministic preset with Python's standard library only:
+The Mongo seed generator uses the same contract as PostgreSQL: a checked-in, smoke-sized generated fixture (`init/02_seed.js`) plus a generator for deliberate larger runs. Mongo emits executable `mongosh` JavaScript rather than SQL, but it follows the same source-directory convention. Regenerate either deterministic preset with Python's standard library only:
 
 ```bash
-python3 generate_seed.py --size tiny --output seed/tiny.js
+python3 generate_seed.py --size tiny --output init/02_seed.js
 python3 generate_seed.py --size demo --output /tmp/terra-mongo-demo.js
 ```
 
