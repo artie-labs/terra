@@ -98,7 +98,7 @@ To load the larger demo fixture after setup, run:
 
 ```bash
 docker compose -p terra-mongo exec -T mongo \
-  mongosh --quiet --host localhost < seed/demo.js
+  mongosh --quiet --host localhost < /tmp/terra-mongo-demo.js
 ```
 
 ## CDC and schema-evolution exercise
