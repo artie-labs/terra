@@ -45,7 +45,7 @@ are not a wildlife-management dataset.
 The checked-in `init/02_seed.sql` is a smoke-sized deterministic seed. Generate a larger dataset when needed:
 
 ```bash
-cd terra/pg
+cd pg
 python3 generate_seed.py --size demo -o init/02_seed.sql
 ```
 
@@ -68,6 +68,8 @@ The generator is deterministic: the same arguments and `--seed` produce identica
 
 ## Start Postgres
 
+Run all Compose commands in this section with `-p terra`. This preserves the original `terra_terra_pgdata` volume across the directory move.
+
 Change the placeholder passwords first:
 
 - `docker-compose.yml`: `POSTGRES_PASSWORD`
@@ -76,20 +78,20 @@ Change the placeholder passwords first:
 Then start and verify:
 
 ```bash
-docker compose up -d
-docker compose logs -f postgres
+docker compose -p terra up -d
+docker compose -p terra logs -f postgres
 
-docker compose exec postgres psql -U postgres -d terra \
+docker compose -p terra exec postgres psql -U postgres -d terra \
   -c "SELECT count(*) FROM observations;"
-docker compose exec postgres psql -U postgres -d terra \
+docker compose -p terra exec postgres psql -U postgres -d terra \
   -c "SELECT pubname FROM pg_publication;"
 ```
 
 The initialization scripts run only for a fresh volume. To reload schema or seed changes:
 
 ```bash
-docker compose down -v
-docker compose up -d
+docker compose -p terra down -v
+docker compose -p terra up -d
 ```
 
 ## Expose the database
@@ -116,14 +118,14 @@ The point of the dataset is to make live changes and observe them downstream. Ru
 
 ```bash
 # A new column appears downstream when a subsequent row change is emitted.
-docker compose exec postgres psql -U postgres -d terra \
+docker compose -p terra exec postgres psql -U postgres -d terra \
   -c "ALTER TABLE animals ADD COLUMN weight_kg numeric(6,2);"
-docker compose exec postgres psql -U postgres -d terra \
+docker compose -p terra exec postgres psql -U postgres -d terra \
   -c "UPDATE animals SET updated_at = now() WHERE animal_id = 1;"
 
 # Continue the demo with a rename. The int-to-bigint exercise must update both
 # sides of observations.animal_id's foreign-key relationship in one migration.
-docker compose exec postgres psql -U postgres -d terra \
+docker compose -p terra exec postgres psql -U postgres -d terra \
   -c "ALTER TABLE animals RENAME COLUMN name TO display_name;"
 ```
 
@@ -132,7 +134,7 @@ A bare `ADD COLUMN` is not itself a WAL event. Touch a row in that table after t
 ## Tear down
 
 ```bash
-docker compose down -v
+docker compose -p terra down -v
 ```
 
 Delete the Artie pipeline before tearing down a source it is still trying to read.
