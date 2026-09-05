@@ -36,7 +36,8 @@ jobs:
           MONGO_ARTIE_PASSWORD: ci-artie-password
         run: |
           docker compose -p terra-mongo-ci down --volumes --remove-orphans
-          docker compose -p terra-mongo-ci up --detach --wait --wait-timeout 90
+          docker compose -p terra-mongo-ci up --detach --wait --wait-timeout 90 mongo
+          docker compose -p terra-mongo-ci run --rm setup
 
       - name: Verify replica set, seed, restricted user, and CDC exercises
         working-directory: mongo

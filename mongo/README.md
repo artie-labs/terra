@@ -42,7 +42,7 @@ docker compose -p terra-mongo up -d
 docker compose -p terra-mongo logs -f mongo
 ```
 
-MongoDB’s first-volume initialization runs the ordered scripts: initialize `rs0`, upsert the tiny seed, then create or update the restricted `artie` account. Verify the replica set and seed:
+MongoDB’s first-volume initialization starts the root account and the tiny seed, then `setup` initializes `rs0` and creates the restricted `artie` account. Verify the replica set and seed:
 
 ```bash
 docker compose -p terra-mongo exec mongo \
