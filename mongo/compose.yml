@@ -2,6 +2,7 @@ services:
   mongo:
     image: mongo:8.0
     container_name: terra-mongo
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-root}
