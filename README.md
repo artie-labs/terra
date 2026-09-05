@@ -5,7 +5,7 @@ Terra provides self-contained source datasets for exercising Artie backfills, CD
 ## Datasets
 
 - [PostgreSQL](pg/README.md) — relational safari dataset with logical replication, deterministic seed generation, and `ALTER TABLE` schema-evolution exercises.
-- MongoDB — planned. It will provide a replica-set-backed document dataset and MongoDB Change Stream exercises.
+- [MongoDB](mongo/README.md) — replica-set-backed document dataset with Change Stream exercises and optional bounded source workloads.
 
 ## Shared scenarios
 
@@ -23,14 +23,22 @@ The expected destination schema and behavior for destructive changes are destina
 ```text
 terra/
 ├── README.md
-└── pg/
+├── pg/
+│   ├── README.md
+│   ├── docker-compose.yml
+│   ├── generate_seed.py
+│   └── init/
+│       ├── 01_schema.sql
+│       ├── 02_seed.sql
+│       └── 03_artie.sql
+└── mongo/
     ├── README.md
-    ├── docker-compose.yml
+    ├── compose.yml
     ├── generate_seed.py
-    └── init/
-        ├── 01_schema.sql
-        ├── 02_seed.sql
-        └── 03_artie.sql
+    ├── exercises.js
+    ├── workload.py
+    ├── init/
+    └── seed/
 ```
 
 Run Compose and seed commands from the dataset directory, for example:
