@@ -37,8 +37,7 @@ terra/
     ├── generate_seed.py
     ├── exercises.js
     ├── workload.py
-    ├── init/
-    └── seed/
+    └── init/
 ```
 
 Run Compose and seed commands from the dataset directory, for example:

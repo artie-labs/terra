@@ -1,0 +1,76 @@
+name: MongoDB fixture
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/mongo.yml"
+      - "mongo/**"
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/mongo.yml"
+      - "mongo/**"
+
+permissions:
+  contents: read
+
+jobs:
+  mongo-fixture:
+    name: MongoDB fresh-volume smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Verify deterministic tiny seed
+        run: |
+          python3 mongo/generate_seed.py --size tiny --output /tmp/02_seed.js
+          cmp /tmp/02_seed.js mongo/init/02_seed.js
+          python3 -m unittest mongo/tests/test_generate_seed.py
+
+      - name: Start MongoDB from a fresh volume
+        working-directory: mongo
+        env:
+          MONGO_ROOT_PASSWORD: ci-root-password
+          MONGO_ARTIE_PASSWORD: ci-artie-password
+        run: |
+          docker compose -p terra-mongo-ci down --volumes --remove-orphans
+          docker compose -p terra-mongo-ci up --detach --wait --wait-timeout 90
+
+      - name: Verify replica set, seed, restricted user, and CDC exercises
+        working-directory: mongo
+        env:
+          MONGO_ROOT_PASSWORD: ci-root-password
+          MONGO_ARTIE_PASSWORD: ci-artie-password
+        run: |
+          docker compose -p terra-mongo-ci exec -T mongo \
+            mongosh --quiet -u root -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin --eval '
+              if (rs.status().ok !== 1) throw new Error("replica set is not ready");
+              const terra = db.getSiblingDB("terra");
+              if (terra.animals.countDocuments() === 0) throw new Error("tiny seed is missing");
+            '
+          docker compose -p terra-mongo-ci exec -T mongo \
+            mongosh --quiet -u artie -p "$MONGO_ARTIE_PASSWORD" --authenticationDatabase admin terra --eval '
+              if (db.animals.findOne() === null) throw new Error("artie cannot read seeded data");
+              const stream = db.watch();
+              stream.close();
+            '
+          docker compose -p terra-mongo-ci exec -T mongo \
+            mongosh --quiet --host localhost -u root -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin terra < exercises.js
+          docker compose -p terra-mongo-ci exec -T mongo \
+            mongosh --quiet -u root -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin terra --eval '
+              if (db.animals.countDocuments({ exerciseId: "ordinary-cdc-v1" }) !== 1) throw new Error("exercise insert is missing");
+              if (db.ranger_notes.countDocuments({ exerciseId: "ordinary-cdc-v1", replaced: true }) !== 1) throw new Error("exercise replacement is missing");
+              if (db.ranger_notes.countDocuments({ seedId: "note-002" }) !== 0) throw new Error("exercise delete did not apply");
+            '
+
+      - name: Print MongoDB logs after failure
+        if: failure()
+        working-directory: mongo
+        run: docker compose -p terra-mongo-ci logs
+
+      - name: Remove MongoDB test volume
+        if: always()
+        working-directory: mongo
+        run: docker compose -p terra-mongo-ci down --volumes --remove-orphans
