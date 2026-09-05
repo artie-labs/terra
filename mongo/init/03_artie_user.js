@@ -3,21 +3,27 @@ const password = process.env.MONGO_ARTIE_PASSWORD;
 if (!password) {
   throw new Error("MONGO_ARTIE_PASSWORD is required");
 }
+
 const roleName = "artie_change_stream_reader";
-const roleDefinition = {
-  privileges: [
-    {
-      resource: { db: "terra", collection: "" },
-      actions: ["find", "changeStream"],
-    },
-  ],
-  roles: [],
-};
+const rolePrivileges = [
+  {
+    resource: { db: "terra", collection: "" },
+    actions: ["find", "changeStream"],
+  },
+];
+const inheritedRoles = [];
 
 if (admin.getRole(roleName, { showPrivileges: false }) === null) {
-  admin.createRole(roleName, roleDefinition);
+  admin.createRole({
+    role: roleName,
+    privileges: rolePrivileges,
+    roles: inheritedRoles,
+  });
 } else {
-  admin.updateRole(roleName, roleDefinition);
+  admin.updateRole(roleName, {
+    privileges: rolePrivileges,
+    roles: inheritedRoles,
+  });
 }
 
 const userDefinition = {
