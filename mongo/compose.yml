@@ -2,27 +2,44 @@ services:
   mongo:
     image: mongo:8.0
     container_name: terra-mongo
+    entrypoint: ["/usr/local/bin/terra-mongo-entrypoint.sh"]
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/data/db/terra-mongo-keyfile"]
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-root}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-change-me-admin-password}
       MONGO_ARTIE_PASSWORD: ${MONGO_ARTIE_PASSWORD:-change-me-to-a-long-random-string}
-      MONGO_REPLICA_HOST: ${MONGO_REPLICA_HOST:-localhost:27017}
     ports:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
-      - ./init:/docker-entrypoint-initdb.d:ro
+      - ./docker-entrypoint.sh:/usr/local/bin/terra-mongo-entrypoint.sh:ro
+      - ./init/02_seed.js:/docker-entrypoint-initdb.d/02_seed.js:ro
+      - ./init/03_artie_user.js:/docker-entrypoint-initdb.d/03_artie_user.js:ro
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "mongosh --quiet --host localhost -u artie -p \"$$MONGO_ARTIE_PASSWORD\" --authenticationDatabase admin terra --eval 'try { quit(db.runCommand({ find: \"animals\", limit: 1 }).ok === 1 ? 0 : 1) } catch (error) { quit(1) }'",
+          "mongosh --quiet --host localhost -u \"$$MONGO_INITDB_ROOT_USERNAME\" -p \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'try { quit(db.adminCommand({ ping: 1 }).ok === 1 ? 0 : 1) } catch (error) { quit(1) }'",
         ]
       interval: 2s
       timeout: 5s
       retries: 30
       start_period: 5s
+
+  setup:
+    image: mongo:8.0
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-root}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-change-me-admin-password}
+      MONGO_REPLICA_HOST: ${MONGO_REPLICA_HOST:-localhost:27017}
+    volumes:
+      - ./init/01_replica_set.sh:/usr/local/bin/init_replica_set.sh:ro
+    entrypoint: ["/bin/bash", "/usr/local/bin/init_replica_set.sh"]
+    restart: "no"
 
 volumes:
   mongo_data:

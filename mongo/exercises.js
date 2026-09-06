@@ -17,7 +17,7 @@ runExercise("insert", () => {
   terra.animals.replaceOne(
     { exerciseId, seedId: "exercise-insert" },
     {
-      _id: ObjectId("ee00000000000000000000001"),
+      _id: ObjectId("ee0000000000000000000001"),
       exerciseId,
       seedId: "exercise-insert",
       name: "Exercise Elephant",
