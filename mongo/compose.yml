@@ -2,7 +2,8 @@ services:
   mongo:
     image: mongo:8.0
     container_name: terra-mongo
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    entrypoint: ["/usr/local/bin/terra-mongo-entrypoint.sh"]
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/data/db/terra-mongo-keyfile"]
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-root}
@@ -12,6 +13,7 @@ services:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
+      - ./docker-entrypoint.sh:/usr/local/bin/terra-mongo-entrypoint.sh:ro
       - ./init/02_seed.js:/docker-entrypoint-initdb.d/02_seed.js:ro
       - ./init/03_artie_user.js:/docker-entrypoint-initdb.d/03_artie_user.js:ro
     healthcheck:
