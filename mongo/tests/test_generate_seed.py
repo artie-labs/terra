@@ -22,6 +22,9 @@ class GenerateSeedTest(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertIn('"wide_attributes"', first)
         self.assertIn("EJSON.deserialize(rawDocument)", first)
+        self.assertIn("const batchSize = 1_000;", first)
+        self.assertIn("collection.bulkWrite(operations, { ordered: false });", first)
+        self.assertNotIn("collection.replaceOne({ _id: document._id }, document, { upsert: true });", first)
         self.assertIn("attribute_300", first)
 
     def test_command_writes_a_fixture(self) -> None:
