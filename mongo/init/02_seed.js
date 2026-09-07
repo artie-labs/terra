@@ -1,4 +1,5 @@
 const terra = db.getSiblingDB("terra");
+const batchSize = 1_000;
 const collections = {
   "animals": [
     {
@@ -5073,9 +5074,12 @@ const collections = {
 };
 for (const [collectionName, documents] of Object.entries(collections)) {
   const collection = terra.getCollection(collectionName);
-  for (const rawDocument of documents) {
-    const document = EJSON.deserialize(rawDocument);
-    collection.replaceOne({ _id: document._id }, document, { upsert: true });
+  for (let start = 0; start < documents.length; start += batchSize) {
+    const operations = documents.slice(start, start + batchSize).map((rawDocument) => {
+      const document = EJSON.deserialize(rawDocument);
+      return { replaceOne: { filter: { _id: document._id }, replacement: document, upsert: true } };
+    });
+    collection.bulkWrite(operations, { ordered: false });
   }
 }
 terra.animals.createIndex({ species: 1, status: 1 });
