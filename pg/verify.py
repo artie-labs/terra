@@ -26,7 +26,7 @@ against a real destination yet; see pg/README.md "Verify".
   python3 verify.py --wait 120                        # retry for up to 120 s
   python3 verify.py --dest-type snowflake --dest "TERRA.PUBLIC" --wait 600
   python3 verify.py --dest-type bigquery  --dest "my-project.terra"
-  python3 verify.py --dest "$DEST_DSN" --dest-schema artie --allow-extra-columns   # Artie writing to Postgres
+  python3 verify.py --dest "$DEST_DSN" --dest-schema artie --allow-extra-columns --ignore-types   # Artie writing to Postgres
 
 Exit status is 0 when every table matches, 1 otherwise.
 """
@@ -35,6 +35,7 @@ import argparse
 import csv
 import io
 import os
+import re
 import subprocess
 import sys
 import time
@@ -43,6 +44,7 @@ DEFAULT_SOURCE = "postgresql://postgres:change-me-admin-password@localhost:5432/
 DEFAULT_DEST = "postgresql://postgres:change-me-admin-password@localhost:5433/terra"
 SKIP_TABLES = {"test_heartbeat_table"}
 NULL_TOKEN = "<null>"
+IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def run(cmd, stdin=None):
@@ -61,6 +63,10 @@ def quote(ident):
     return '"' + ident.replace('"', '""') + '"'
 
 
+def literal(value):
+    return "'" + value.replace("'", "''") + "'"
+
+
 class PostgresSide:
     def __init__(self, dsn, schema="public"):
         self.dsn = dsn
@@ -69,7 +75,7 @@ class PostgresSide:
     def tables(self):
         rows = psql_rows(self.dsn, (
             "SELECT table_name FROM information_schema.tables "
-            f"WHERE table_schema = '{self.schema}' AND table_type = 'BASE TABLE' ORDER BY table_name"
+            f"WHERE table_schema = {literal(self.schema)} AND table_type = 'BASE TABLE' ORDER BY table_name"
         ))
         return [r[0] for r in rows if r[0] not in SKIP_TABLES]
 
@@ -78,7 +84,7 @@ class PostgresSide:
         rows = psql_rows(self.dsn, (
             "SELECT a.attname, format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
             "JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace "
-            f"WHERE n.nspname = '{self.schema}' AND c.relname = '{table}' AND a.attnum > 0 "
+            f"WHERE n.nspname = {literal(self.schema)} AND c.relname = {literal(table)} AND a.attnum > 0 "
             "AND NOT a.attisdropped ORDER BY a.attname"
         ))
         return {name: dtype for name, dtype in rows}
@@ -124,7 +130,7 @@ class SnowflakeSide:
     def columns(self, table):
         rows = self.query(
             f"SELECT lower(column_name), data_type FROM {self.database}.information_schema.columns "
-            f"WHERE table_schema = '{self.schema.upper()}' AND table_name = '{table.upper()}'"
+            f"WHERE table_schema = {literal(self.schema.upper())} AND table_name = {literal(table.upper())}"
         )
         return {name: dtype for name, dtype in rows}
 
@@ -155,7 +161,7 @@ class BigQuerySide:
     def columns(self, table):
         rows = self.query(
             f"SELECT lower(column_name), data_type FROM `{self.project}.{self.dataset}`.INFORMATION_SCHEMA.COLUMNS "
-            f"WHERE table_name = '{table}'"
+            f"WHERE table_name = {literal(table)}"
         )
         return {name: dtype for name, dtype in rows}
 
@@ -167,7 +173,7 @@ class BigQuerySide:
         return {"rows": int(count), "pk_sum": int(float(total)), "columns": {c: columns[c] for c in cols}}
 
 
-def compare_once(source, dest, dest_type, tables, allow_extra):
+def compare_once(source, dest, dest_type, tables, allow_extra, ignore_types=False):
     results = []
     for table in tables:
         src_cols = source.columns(table)
@@ -194,7 +200,8 @@ def compare_once(source, dest, dest_type, tables, allow_extra):
             if extra:
                 problems.append("destination has extra " + ", ".join(extra))
             if dest_type == "postgres":
-                mismatched = [c for c in src["columns"] if c in dst["columns"] and src["columns"][c] != dst["columns"][c]]
+                mismatched = [] if ignore_types else [
+                    c for c in src["columns"] if c in dst["columns"] and src["columns"][c] != dst["columns"][c]]
                 if mismatched:
                     problems.append("type differs: " + ", ".join(f"{c} {src['columns'][c]} vs {dst['columns'][c]}" for c in mismatched))
                 if src["checksum"] != dst["checksum"]:
@@ -237,6 +244,8 @@ def main():
     parser.add_argument("--dest-schema", default="public", help="schema on a Postgres destination (default public)")
     parser.add_argument("--allow-extra-columns", action="store_true",
                         help="report, but do not fail on, destination columns the source lacks; implied for snowflake and bigquery")
+    parser.add_argument("--ignore-types", action="store_true",
+                        help="compare column names, counts and checksums only; for Postgres tables Artie created with its own types")
     parser.add_argument("--tables", help="comma separated subset; default is every base table in the source")
     parser.add_argument("--wait", type=float, default=0, help="seconds to keep retrying until everything matches")
     parser.add_argument("--interval", type=float, default=2)
@@ -255,8 +264,13 @@ def main():
     attempt = 0
     while True:
         attempt += 1
-        tables = args.tables.split(",") if args.tables else source.tables()
-        results = compare_once(source, dest, args.dest_type, tables, allow_extra)
+        tables = [t.strip() for t in args.tables.split(",")] if args.tables else source.tables()
+        bad = [t for t in tables if not IDENT.match(t)]
+        if bad:
+            sys.exit("verify: invalid table name(s): " + ", ".join(bad))
+        if not tables:
+            sys.exit("verify: FAIL (the source has no base tables in schema public; check --source)")
+        results = compare_once(source, dest, args.dest_type, tables, allow_extra, args.ignore_types)
         failed = [r for r in results if r["problems"]]
         if not failed or time.monotonic() >= deadline:
             break

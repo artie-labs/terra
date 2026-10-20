@@ -63,7 +63,8 @@ jobs:
             after=$(grep -c ' ops  totals ' /tmp/stream.log || true)
             [ "$after" -gt "$before" ] || { echo "stream.py stopped writing after event $n"; exit 1; }
           done
-          kill "$(cat /tmp/stream.pid)"; sleep 2
+          kill "$(cat /tmp/stream.pid)" 2>/dev/null || echo "writer had already exited"
+          sleep 2
           tail -3 /tmp/stream.log
           failures=$(grep -c 'failed' /tmp/stream.log || true)
           [ "$failures" -le 2 ] || { echo "stream.py failed $failures ticks"; exit 1; }
@@ -112,9 +113,25 @@ jobs:
           sleep 5
           events/apply.sh all
           python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --wait 180
-          kill "$(cat /tmp/stream.pid)"; sleep 2
+          kill "$(cat /tmp/stream.pid)" 2>/dev/null || echo "writer had already exited"
+          sleep 2
           python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --wait 120
           tail -2 /tmp/stream.log
+
+      - name: Event files are re-runnable, and the source-only path works
+        working-directory: pg
+        run: |
+          events/apply.sh all
+          SUB_DSN=none events/apply.sh all
+          python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --wait 120
+
+      - name: Extra destination columns fail by default and pass with --allow-extra-columns
+        working-directory: pg
+        run: |
+          psql "$SUB_DSN" -X -q -c "ALTER TABLE animals ADD COLUMN legacy_note text DEFAULT 'kept'"
+          if python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --wait 5; then echo "expected FAIL"; exit 1; fi
+          python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --allow-extra-columns --wait 60
+          python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --allow-extra-columns --ignore-types --wait 60
 
       - name: Print logs after failure
         if: failure()

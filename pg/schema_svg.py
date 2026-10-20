@@ -49,8 +49,9 @@ def load(dsn):
 
 
 def layout(tables):
-    # Two columns: reference tables on the left, fact tables on the right.
-    order = sorted(tables, key=lambda t: (len([1 for _ in tables[t]]), t))
+    # Two columns, tables placed alternately in order of column count then
+    # name, so the layout is stable across runs.
+    order = sorted(tables, key=lambda t: (len(tables[t]), t))
     boxes, cols = {}, [0, 0]
     for i, table in enumerate(order):
         col = i % 2

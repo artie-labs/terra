@@ -15,14 +15,21 @@ HERE = pathlib.Path(__file__).resolve().parent
 START, END = "<!-- bench:start -->", "<!-- bench:end -->"
 
 
-def read_bench():
-    values = {}
-    for line in (HERE / "bench.txt").read_text().splitlines():
+def read_bench(path=None):
+    """Parse bench.txt: phase values plus the provenance line bench.sh wrote.
+
+    Shared with site/build.py, which imports it, so the format is parsed in
+    one place.
+    """
+    values, note = {}, ""
+    for line in (path or HERE / "bench.txt").read_text().splitlines():
+        if line.startswith("# median of"):
+            note = line[2:]
         if line.startswith("#") or not line.strip():
             continue
         key, value = line.split()
         values[key] = int(value)
-    return values
+    return values, note
 
 
 def render(values):
@@ -39,7 +46,7 @@ def main():
     start, end = text.find(START), text.find(END)
     if start < 0 or end < 0:
         sys.exit("pg/README.md has no bench markers")
-    new_line = render(read_bench())
+    new_line = render(read_bench()[0])
     updated = text[:start] + new_line + text[end + len(END):]
     if "--check" in sys.argv:
         if updated != text:

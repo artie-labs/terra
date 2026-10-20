@@ -29,7 +29,9 @@ while [ $# -gt 0 ]; do
 done
 SOURCE_DSN="${SOURCE_DSN:-postgresql://postgres:change-me-admin-password@localhost:5432/terra}"
 SUB_DSN="${SUB_DSN:-postgresql://postgres:change-me-admin-password@localhost:5433/terra}"
-project="${COMPOSE_PROJECT:-terra}"
+# Honours Docker's own variable, so COMPOSE_PROJECT_NAME=terra-ci bench.sh
+# keeps its volumes apart from a local `-p terra` stack.
+project="${COMPOSE_PROJECT_NAME:-terra}"
 
 now() { date +%s; }
 

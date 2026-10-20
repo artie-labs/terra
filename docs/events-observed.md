@@ -15,20 +15,22 @@ what Artie does; see [events-expected.md](events-expected.md) for that.
 
 Every event ended with `verify: PASS`. Columns, types, row counts and a
 per-table checksum matched the source after each step, and the subscriber
-logged no errors at all. Each subscriber file is split into sections that
+logged no errors at all. `verify.py --wait` usually needs one to three polls
+(2 s apart) after an event because the subscriber runs a second or two behind
+the writer; the exact count varies by run and is in docs/final-run.md. Each subscriber file is split into sections that
 `apply.sh` runs before the source event, right after it, and after the
 subscriber has caught up (see "Why the subscriber migrates in two steps").
 
 | # | Event | Subscriber DDL | What the subscriber did | verify |
 | --- | --- | --- | --- | --- |
-| 01 | Weigh-in | before: add column | No errors. The column was added on the subscriber first, so the first row carrying `weight_kg` fit. | PASS on attempt 2 (about 2 s of lag) |
-| 02 | A pangolin is sighted | before: add enum label | No errors. The enum label existed on the subscriber before animal 900001 arrived. | PASS on attempt 2 |
-| 03 | The herd outgrows int | before: widen both columns | No errors. Both tables were widened on the subscriber first; animal 3000000001 and observation 9000000001 arrived as text and fit. The rewrite on the publisher produced no replicated changes. | PASS on attempt 1 |
-| 04 | The collars come online | before: create table; after: `REFRESH PUBLICATION` | No errors. With the table already present but not yet subscribed, the apply worker skipped its rows instead of failing; the refresh then started a synchronization worker that copied the existing rows and caught up. In an earlier version that created the table only after the publisher, the worker failed twice with `relation "public.collar_pings" does not exist` and recovered 5 s later. | PASS on attempt 3 |
-| 05 | The naming committee | before: add `display_name`, make `name` nullable; after catch-up: copy values, drop `name` | No errors. Rows written before the rename (carrying `name`) and after it (carrying `display_name`) both fit while the two columns coexisted. After catch-up the subscriber copied `name` into `display_name` for the untouched rows and dropped `name`. | PASS on attempt 2 |
-| 06 | Rangers file structured reports | before: add column | No errors. The jsonb text form converted back to jsonb on the subscriber; the checksum, which compares `jsonb::text`, matched. | PASS on attempt 1 |
-| 07 | Survey adds elevation | before: add column with default | No errors. Only the 12 UPDATEd rows were sent; the backfill of 0s was a catalog change on both sides and nothing crossed the wire for it. | PASS on attempt 1 |
-| 08 | Status moves to the collars | before: make `status` nullable; after catch-up: drop it | No errors. Rows written after the drop omit `status` and land with NULL; after catch-up the column is dropped. One `stream.py` batch can fail on the publisher (`column "status" of relation "animals" does not exist`) when the drop lands inside a tick; it resyncs and continues. | PASS on attempt 1 |
+| 01 | Weigh-in | before: add column | No errors. The column was added on the subscriber first, so the first row carrying `weight_kg` fit. | PASS |
+| 02 | A pangolin is sighted | before: add enum label | No errors. The enum label existed on the subscriber before animal 900001 arrived. | PASS |
+| 03 | The herd outgrows int | before: widen both columns | No errors. Both tables were widened on the subscriber first; animal 3000000001 and observation 9000000001 arrived as text and fit. The rewrite on the publisher produced no replicated changes. | PASS |
+| 04 | The collars come online | before: create table; after: `REFRESH PUBLICATION` | No errors. With the table already present but not yet subscribed, the apply worker skipped its rows instead of failing; the refresh then started a synchronization worker that copied the existing rows and caught up. In an earlier version that created the table only after the publisher, the worker failed twice with `relation "public.collar_pings" does not exist` and recovered 5 s later. | PASS |
+| 05 | The naming committee | before: add `display_name`, make `name` nullable; after catch-up: copy values, drop `name` | No errors. Rows written before the rename (carrying `name`) and after it (carrying `display_name`) both fit while the two columns coexisted. After catch-up the subscriber copied `name` into `display_name` for the untouched rows and dropped `name`. | PASS |
+| 06 | Rangers file structured reports | before: add column | No errors. The jsonb text form converted back to jsonb on the subscriber; the checksum, which compares `jsonb::text`, matched. | PASS |
+| 07 | Survey adds elevation | before: add column with default | No errors. Only the 12 UPDATEd rows were sent; the backfill of 0s was a catalog change on both sides and nothing crossed the wire for it. | PASS |
+| 08 | Status moves to the collars | before: make `status` nullable; after catch-up: drop it | No errors. Rows written after the drop omit `status` and land with NULL; after catch-up the column is dropped. One `stream.py` batch can fail on the publisher (`column "status" of relation "animals" does not exist`) when the drop lands inside a tick; it resyncs and continues. | PASS |
 
 Final state after run A, stream stopped: 4 tables, all matching.
 

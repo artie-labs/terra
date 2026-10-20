@@ -22,6 +22,8 @@ events/apply.sh all && python3 verify.py --wait 120
 
 Run the second command in its own terminal; it writes about ten rows a second until you stop it. The third applies the eight events to the source and to the subscriber, waiting for the subscriber to catch up where an event needs it, then checks that the subscriber matches. To take the events one at a time: `events/apply.sh 1`, then `python3 verify.py --wait 120`, and so on to 8. If the subscriber is not running, `apply.sh` stops; set `SUB_DSN=none` to apply to the source only, for example when Artie is the consumer.
 
+If `docker compose up --wait` reports the subscriber unhealthy, its `CREATE SUBSCRIPTION` failed on first start, usually because the `artie` password in `init/03_artie.sql` and `TERRA_ARTIE_PASSWORD` differ; check `docker compose -p terra logs subscriber`, fix, then `docker compose -p terra down -v` and start again.
+
 Ports: the source is on `localhost:5432` (all interfaces, since Artie has to reach it), the subscriber on `127.0.0.1:5433` only. Both use the `postgres` password in `docker-compose.yml`. Reset everything with `docker compose -p terra down -v`. The event files can be re-run; each one checks the current schema before it changes it.
 
 ## What you will see
@@ -90,7 +92,7 @@ For a Postgres destination it compares, per table: column names and full types (
 
 For Snowflake and BigQuery it compares column names, row count and the sum of the primary key, through the `snowsql` and `bq` CLIs. Those two modes were written against the docs and have not been run against a real destination. Doing that is item 1 of the hand-off checklist in the v0.1 pull request.
 
-Extra columns on the destination are reported but do not fail the check for Snowflake and BigQuery, or for Postgres with `--allow-extra-columns`. Artie's docs say a dropped or renamed source column stays in the destination unless hard deletes for columns are on (`artie-schema-evolution` in sources.md), so after events 05 and 08 a destination is expected to still have `name` and `status`.
+Extra columns on the destination are reported but do not fail the check for Snowflake and BigQuery, or for Postgres with `--allow-extra-columns`. `--ignore-types` skips the type comparison, which is needed for Postgres tables Artie created with its own type choices. Artie's docs say a dropped or renamed source column stays in the destination unless hard deletes for columns are on (`artie-schema-evolution` in sources.md), so after events 05 and 08 a destination is expected to still have `name` and `status`.
 
 Exit status is 0 on a full match, 1 otherwise, which is what CI keys on.
 
@@ -145,7 +147,7 @@ CI runs that command and `cmp`s the result. For a larger dataset:
 python3 generate_seed.py --size demo -o init/02_seed.sql
 ```
 
-The generator is deterministic: the same arguments and `--seed` produce identical output. About one note in ten is long enough to be stored out of line (TOAST), and timestamps mix `+02` and `+03` offsets. Initialization scripts run only on a fresh volume, so reload with `docker compose -p terra down -v && docker compose -p terra up -d --wait`.
+The generator is deterministic: the same arguments and `--seed` produce identical output. About one note in ten is over 2 kB, and `observations.notes` has `STORAGE EXTERNAL`, so those notes are stored out of line in the TOAST table rather than compressed inline (with the default strategy they compress to about 1.3 kB and never leave the row). An UPDATE that does not touch `notes` then omits the column from the WAL, which is the case Artie's docs describe under TOAST handling (`artie-postgres` in sources.md). Timestamps mix `+02` and `+03` offsets. Initialization scripts run only on a fresh volume, so reload with `docker compose -p terra down -v && docker compose -p terra up -d --wait`.
 
 ## Contents
 

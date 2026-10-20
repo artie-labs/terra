@@ -35,27 +35,12 @@ import time
 
 DEFAULT_DSN = "postgresql://postgres:change-me-admin-password@localhost:5432/terra"
 
-FIRST_NAMES = [
-    "Asha", "Baraka", "Duma", "Imani", "Jabari", "Kito", "Lulu", "Mosi",
-    "Nia", "Rafiki", "Safi", "Tamu", "Zuri", "Kubwa", "Moyo", "Pendo",
-]
-SURNAMES = ["the Swift", "the Watchful", "of the Plains", "of the Delta", "Jr.", None, None, None]
-STATUSES = ["newborn", "juvenile", "adult", "collared", "deceased"]
-SHORT_NOTES = [
-    "Ranger observation near the {feature}; animal appeared healthy and alert.",
-    "Fresh spoor and visual confirmation at {distance} m from the waterline.",
-    "Brief feeding observation; group size estimated at {count} individuals.",
-    "Camera-trap match confirmed with confidence {confidence}; no intervention required.",
-    "Tracking collar {tag} reported normally; last known movement within expected range.",
-]
-LONG_PARAGRAPH = (
-    "Extended ranger observation recorded during the {season} patrol. Identification: "
-    "estimated age class {age}, body condition {condition}/5, and a {confidence} photo match. "
-    "The observer recorded {count} nearby animals and noted distinctive marks near the {side} "
-    "flank. Behaviour: spent {minutes} minutes {activity} before moving toward the {feature}. "
-    "Environment: air temperature {air} C, wind {wind} kt, visibility {visibility} m. "
-    "Telemetry: collar {tag} last transmitted {days} days ago, battery estimate {battery}%."
-)
+# Names, statuses and note templates come from the seed generator in this
+# directory, so the stream writes the same kind of rows the seed did. About
+# one note in ten is a multi-paragraph note over 2 kB; observations.notes has
+# STORAGE EXTERNAL, so those are stored out of line (TOAST).
+from generate_seed import FIRST_NAMES, STATUSES, SURNAMES, render_long, render_short  # noqa: E402
+
 RANGERS = ["A.M.", "R.K.", "J.T.", "S.P.", "L.O.", "D.C."]
 WEATHER = ["clear", "overcast", "light rain", "dust haze", "thunderstorm"]
 
@@ -69,9 +54,11 @@ class Psql:
         self.dsn = dsn
 
     def run(self, sql):
+        # start_new_session keeps a terminal Ctrl-C from also hitting psql, so
+        # the batch in flight completes and the loop stops cleanly.
         result = subprocess.run(
             ["psql", self.dsn, "-X", "-q", "-At", "-v", "ON_ERROR_STOP=1"],
-            input=sql, text=True, capture_output=True,
+            input=sql, text=True, capture_output=True, start_new_session=True,
         )
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or "psql failed")
@@ -86,17 +73,21 @@ class Schema:
     """Snapshot of the parts of the live schema the writer cares about."""
 
     def __init__(self, db):
-        cols = db.rows(
-            "SELECT table_name, column_name FROM information_schema.columns "
-            "WHERE table_schema = 'public' ORDER BY table_name, ordinal_position"
+        # One round trip: columns and enum labels in a single query.
+        rows = db.rows(
+            "SELECT 'col', table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' "
+            "UNION ALL "
+            "SELECT 'enum', t.typname, e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid "
+            "WHERE t.typname = 'animal_species' ORDER BY 1, 2, 3"
         )
         self.columns = {}
-        for table, column in cols:
-            self.columns.setdefault(table, []).append(column)
-        self.species = [r[0] for r in db.rows(
-            "SELECT enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid "
-            "WHERE t.typname = 'animal_species' ORDER BY enumsortorder"
-        )]
+        self.species = []
+        for kind, a, b in rows:
+            if kind == "col":
+                self.columns.setdefault(a, []).append(b)
+            else:
+                self.species.append(b)
 
     def has(self, table, column=None):
         if column is None:
@@ -115,7 +106,11 @@ class Writer:
         self.db = db
         self.rng = random.Random(seed)
         self.animal_ids = [int(r[0]) for r in db.rows("SELECT animal_id FROM animals ORDER BY animal_id")]
-        self.hole_ids = [int(r[0]) for r in db.rows("SELECT watering_hole_id FROM watering_holes ORDER BY 1")]
+        self.holes = [
+            {"watering_hole_id": int(i), "name": n, "raw_latitude": float(la), "raw_longitude": float(lo)}
+            for i, n, la, lo in db.rows("SELECT watering_hole_id, name, latitude, longitude FROM watering_holes ORDER BY 1")
+        ]
+        self.hole_ids = [h["watering_hole_id"] for h in self.holes]
         self.next_observation = int(db.rows("SELECT coalesce(max(observation_id), 0) + 1 FROM observations")[0][0])
         self.next_animal = int(db.rows("SELECT coalesce(max(animal_id), 0) + 1 FROM animals")[0][0])
         self.live_observations = [int(r[0]) for r in db.rows(
@@ -141,23 +136,10 @@ class Writer:
         live = {int(r[0]) for r in db.rows("SELECT observation_id FROM observations ORDER BY observation_id DESC LIMIT 500")}
         self.live_observations = [o for o in self.live_observations if o in live]
 
-    def note(self):
-        r = self.rng
-        if r.random() < 0.1:
-            # Long enough to cross the 2 kB TOAST threshold once stored.
-            body = LONG_PARAGRAPH.format(
-                season=r.choice(["dry-season", "green-season"]), age=r.choice(["juvenile", "adult"]),
-                condition=r.randrange(2, 6), confidence=r.choice(["high", "medium"]), count=r.randrange(1, 35),
-                side=r.choice(["left", "right"]), minutes=r.randrange(8, 90), activity=r.choice(["drinking", "resting"]),
-                feature=r.choice(["reed bed", "salt pan"]), air=f"{r.uniform(16, 39):.1f}", wind=r.randrange(0, 35),
-                visibility=r.randrange(200, 5000), tag=f"C{r.randrange(10000, 99999)}", days=r.randrange(1, 210),
-                battery=r.randrange(8, 100),
-            )
-            return "\n\n".join([body] * 4)
-        return r.choice(SHORT_NOTES).format(
-            feature=r.choice(["reed bed", "salt pan", "acacia stand"]), distance=r.randrange(5, 500),
-            count=r.randrange(1, 35), confidence=r.choice(["high", "medium"]), tag=f"C{r.randrange(10000, 99999)}",
-        )
+    def note(self, hole):
+        if self.rng.random() < 0.1:
+            return render_long(self.rng, hole)
+        return render_short(self.rng)
 
     def field_report(self):
         r = self.rng
@@ -168,9 +150,10 @@ class Writer:
 
     def insert_observation(self, schema):
         r = self.rng
+        hole = r.choice(self.holes)
         cols = ["observation_id", "animal_id", "watering_hole_id", "observed_at", "notes"]
-        vals = [str(self.next_observation), str(r.choice(self.animal_ids)), str(r.choice(self.hole_ids)),
-                "now()", sql_text(self.note())]
+        vals = [str(self.next_observation), str(r.choice(self.animal_ids)), str(hole["watering_hole_id"]),
+                "now()", sql_text(self.note(hole))]
         if schema.has("observations", "field_report"):
             cols.append("field_report")
             vals.append(sql_text(self.field_report()) + "::jsonb")

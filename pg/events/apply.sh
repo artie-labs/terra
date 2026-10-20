@@ -80,6 +80,7 @@ else
 fi
 
 for n in "$@"; do
+  case "$n" in *[!0-9]*|"") echo "event numbers must be integers 1 to 8, got '$n'" >&2; exit 2 ;; esac
   nn=$(printf "%02d" "$n")
   src=$(ls "$here"/"${nn}"_*.sql 2>/dev/null | head -1)
   [ -n "$src" ] || { echo "no event ${nn}" >&2; exit 1; }

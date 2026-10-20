@@ -36,3 +36,9 @@ CREATE TABLE observations (
     observed_at       timestamptz NOT NULL,
     notes             text
 );
+
+-- Long notes are stored out of line, uncompressed, so about one observation in
+-- ten has a TOASTed column. With the default EXTENDED strategy the notes
+-- compress to about 1.3 kB and stay inline, and a CDC consumer would never see
+-- an unchanged-TOAST placeholder in the WAL. EXTERNAL makes that case real.
+ALTER TABLE observations ALTER COLUMN notes SET STORAGE EXTERNAL;

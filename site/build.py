@@ -12,9 +12,12 @@ import json
 import math
 import pathlib
 import shutil
+import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 OUT = HERE / "_site"
+sys.path.insert(0, str(HERE.parent / "pg"))
+from bench_readme import read_bench  # noqa: E402  (one parser for bench.txt)
 PLAYER_CSS = "https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.css"
 PLAYER_JS = "https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.min.js"
 CTA = ('Built by <a href="https://www.artie.com">Artie</a>. To replicate this database into a warehouse for real, '
@@ -25,19 +28,6 @@ SITE_LINE = "A fake world with real database behavior. Clone it, stream it, brea
 
 def esc(value):
     return html.escape(str(value), quote=True)
-
-
-def read_bench(path):
-    """Return the phase values and the provenance line bench.sh wrote."""
-    values, note = {}, ""
-    for line in path.read_text().splitlines():
-        if line.startswith("# median of"):
-            note = line[2:]
-        if line.startswith("#") or not line.strip():
-            continue
-        key, value = line.split()
-        values[key] = int(value)
-    return values, note
 
 
 def run_minutes(dataset):
