@@ -4,10 +4,12 @@
 -- Postgres: a rename has no effect on stored data (docs/sources.md:
 -- pg-altertable) and is not replicated. Logical replication matches columns by
 -- name (docs/sources.md: pg-lr-subscription), so the first row sent after the
--- rename carries display_name and the subscriber's apply worker fails with
--- "missing replicated column" until the subscriber table is renamed too. The
--- worker keeps retrying the same transaction, so nothing is lost
--- (docs/sources.md: pg-lr-conflicts).
+-- rename carries display_name. Rows that committed before the rename still
+-- carry name, even if they are applied later, because each transaction is
+-- decoded with the catalog of its own time. A subscriber that renames at the
+-- same moment rejects one kind or the other and stops for good
+-- (docs/sources.md: pg-lr-conflicts). events/subscriber/05 therefore expands
+-- first (both columns) and contracts only after apply.sh confirms catch-up.
 --
 -- Artie (documented): the reconciliation job does not rename columns
 -- (docs/sources.md: artie-schema-evolution). What the normal sync does with a

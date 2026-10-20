@@ -3,10 +3,18 @@
 
 For every base table in the source's public schema it compares:
 
-  columns   name and, for a Postgres destination, data type
+  columns   name and, for a Postgres destination, the full type
+            (format_type, so numeric(6,2) and numeric(9,6) differ)
   rows      count (destination rows flagged __artie_delete are excluded)
   checksum  md5 over every row's text form, ordered by primary key
             (Postgres destinations only; see --dest-type)
+
+Extra columns on the destination are reported but do not fail the check when
+--allow-extra-columns is given. That is the default for Snowflake and
+BigQuery, because Artie's docs say dropped and renamed source columns stay in
+the destination unless hard deletes for columns are enabled (docs/sources.md:
+artie-schema-evolution); after events 05 and 08 a destination legitimately
+still has "name" and "status". Artie's own __artie_* columns are always ignored.
 
 Standard library only. Postgres is reached through the psql binary, Snowflake
 through snowsql, BigQuery through bq. The Snowflake and BigQuery paths compare
@@ -18,11 +26,14 @@ against a real destination yet; see pg/README.md "Verify".
   python3 verify.py --wait 120                        # retry for up to 120 s
   python3 verify.py --dest-type snowflake --dest "TERRA.PUBLIC" --wait 600
   python3 verify.py --dest-type bigquery  --dest "my-project.terra"
+  python3 verify.py --dest "$DEST_DSN" --dest-schema artie --allow-extra-columns   # Artie writing to Postgres
 
 Exit status is 0 when every table matches, 1 otherwise.
 """
 
 import argparse
+import csv
+import io
 import os
 import subprocess
 import sys
@@ -51,27 +62,31 @@ def quote(ident):
 
 
 class PostgresSide:
-    def __init__(self, dsn):
+    def __init__(self, dsn, schema="public"):
         self.dsn = dsn
+        self.schema = schema
 
     def tables(self):
         rows = psql_rows(self.dsn, (
             "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name"
+            f"WHERE table_schema = '{self.schema}' AND table_type = 'BASE TABLE' ORDER BY table_name"
         ))
         return [r[0] for r in rows if r[0] not in SKIP_TABLES]
 
     def columns(self, table):
+        # format_type keeps precision and scale, so numeric(6,2) vs numeric fails.
         rows = psql_rows(self.dsn, (
-            "SELECT column_name, data_type FROM information_schema.columns "
-            f"WHERE table_schema = 'public' AND table_name = '{table}' ORDER BY column_name"
+            "SELECT a.attname, format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
+            "JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace "
+            f"WHERE n.nspname = '{self.schema}' AND c.relname = '{table}' AND a.attnum > 0 "
+            "AND NOT a.attisdropped ORDER BY a.attname"
         ))
         return {name: dtype for name, dtype in rows}
 
     def primary_key(self, table):
         rows = psql_rows(self.dsn, (
             "SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid "
-            "AND a.attnum = ANY(i.indkey) WHERE i.indrelid = 'public." + table + "'::regclass "
+            f"AND a.attnum = ANY(i.indkey) WHERE i.indrelid = '{quote(self.schema)}.{quote(table)}'::regclass "
             "AND i.indisprimary ORDER BY array_position(i.indkey, a.attnum)"
         ))
         return [r[0] for r in rows]
@@ -84,7 +99,7 @@ class PostgresSide:
         sql = (
             f"SELECT count(*), coalesce(md5(string_agg(h, ',' ORDER BY {order})), '') "
             f"FROM (SELECT md5(concat_ws('|', {row_text})) AS h, {', '.join(quote(c) for c in pk) or '1'} "
-            f"FROM {quote(table)} {where}) s"
+            f"FROM {quote(self.schema)}.{quote(table)} {where}) s"
         )
         count, checksum = psql_rows(self.dsn, sql)[0]
         return {"rows": int(count), "checksum": checksum, "columns": {c: columns[c] for c in cols}}
@@ -128,8 +143,11 @@ class BigQuerySide:
 
     def query(self, sql):
         out = run(["bq", "query", "--nouse_legacy_sql", "--format=csv", "--quiet", sql])
-        lines = [line for line in out.splitlines() if line.strip()]
-        return [line.split(",") for line in lines[1:]]
+        # bq may print status lines before the CSV; keep from the header on.
+        lines = out.splitlines()
+        start = next((i for i, line in enumerate(lines) if line and "," in line), len(lines))
+        rows = list(csv.reader(io.StringIO("\n".join(lines[start:]))))
+        return [row for row in rows[1:] if row]
 
     def columns(self, table):
         rows = self.query(
@@ -146,7 +164,7 @@ class BigQuerySide:
         return {"rows": int(count), "pk_sum": int(float(total)), "columns": {c: columns[c] for c in cols}}
 
 
-def compare_once(source, dest, dest_type, tables):
+def compare_once(source, dest, dest_type, tables, allow_extra):
     results = []
     for table in tables:
         src_cols = source.columns(table)
@@ -184,8 +202,12 @@ def compare_once(source, dest, dest_type, tables):
                     problems.append("primary key sum differs")
             if src["rows"] != dst["rows"]:
                 problems.append(f"rows {src['rows']} vs {dst['rows']}")
+        notes = []
+        if dst is not None and extra and allow_extra:
+            problems = [p for p in problems if not p.startswith("destination has extra")]
+            notes.append("extra on destination: " + ", ".join(extra))
         results.append({"table": table, "source_rows": src["rows"], "dest_rows": dst["rows"] if dst else None,
-                        "columns": len(src["columns"]), "problems": problems})
+                        "columns": len(src["columns"]), "problems": problems, "notes": notes})
     return results
 
 
@@ -195,6 +217,8 @@ def render(results, dest_type):
     for r in results:
         dst_rows = "-" if r["dest_rows"] is None else str(r["dest_rows"])
         status = "ok" if not r["problems"] else "; ".join(r["problems"])
+        if r.get("notes"):
+            status += " (" + "; ".join(r["notes"]) + ")"
         print(f"{r['table']:<{width}}  {r['source_rows']:>9}  {dst_rows:>9}  {r['columns']:>4}  {status}")
     if dest_type != "postgres":
         print(f"note: {dest_type} compare is columns + row count + primary key sum, no checksum")
@@ -205,14 +229,18 @@ def main():
     parser.add_argument("--source", default=os.environ.get("SOURCE_DSN", DEFAULT_SOURCE))
     parser.add_argument("--dest", default=os.environ.get("DEST_DSN", DEFAULT_DEST))
     parser.add_argument("--dest-type", choices=["postgres", "snowflake", "bigquery"], default="postgres")
+    parser.add_argument("--dest-schema", default="public", help="schema on a Postgres destination (default public)")
+    parser.add_argument("--allow-extra-columns", action="store_true",
+                        help="report, but do not fail on, destination columns the source lacks; implied for snowflake and bigquery")
     parser.add_argument("--tables", help="comma separated subset; default is every base table in the source")
     parser.add_argument("--wait", type=float, default=0, help="seconds to keep retrying until everything matches")
     parser.add_argument("--interval", type=float, default=2)
     args = parser.parse_args()
 
     source = PostgresSide(args.source)
+    allow_extra = args.allow_extra_columns or args.dest_type != "postgres"
     if args.dest_type == "postgres":
-        dest = PostgresSide(args.dest)
+        dest = PostgresSide(args.dest, args.dest_schema)
     elif args.dest_type == "snowflake":
         dest = SnowflakeSide(args.dest)
     else:
@@ -223,7 +251,7 @@ def main():
     while True:
         attempt += 1
         tables = args.tables.split(",") if args.tables else source.tables()
-        results = compare_once(source, dest, args.dest_type, tables)
+        results = compare_once(source, dest, args.dest_type, tables, allow_extra)
         failed = [r for r in results if r["problems"]]
         if not failed or time.monotonic() >= deadline:
             break

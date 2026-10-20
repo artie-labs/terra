@@ -28,18 +28,21 @@ def esc(value):
 
 
 def read_bench(path):
-    values = {}
+    """Return the phase values and the provenance line bench.sh wrote."""
+    values, note = {}, ""
     for line in path.read_text().splitlines():
+        if line.startswith("# median of"):
+            note = line[2:]
         if line.startswith("#") or not line.strip():
             continue
         key, value = line.split()
         values[key] = int(value)
-    return values
+    return values, note
 
 
 def run_minutes(dataset):
-    bench = read_bench((HERE / dataset["bench_file"]).resolve())
-    return bench["total"], max(1, math.ceil(bench["total"] / 60))
+    bench, note = read_bench((HERE / dataset["bench_file"]).resolve())
+    return bench["total"], max(1, math.ceil(bench["total"] / 60)), note
 
 
 def render(template, **fields):
@@ -52,7 +55,7 @@ def render(template, **fields):
 def index_page(template, datasets):
     items = []
     for d in datasets:
-        seconds, minutes = run_minutes(d)
+        seconds, minutes, _ = run_minutes(d)
         items.append(f'<li><a href="{esc(d["slug"])}.html">{esc(d["name"])}</a> '
                      f'<span>{esc(d["source_db"])}. {esc(d["capability"])}. Runs in {minutes} min.</span></li>')
     body = (f'<h1>{esc(SITE_TITLE)}</h1><p class="lede">{esc(SITE_LINE)}</p>'
@@ -66,11 +69,11 @@ def index_page(template, datasets):
 
 
 def dataset_page(template, d):
-    seconds, minutes = run_minutes(d)
+    seconds, minutes, note = run_minutes(d)
     facts = [
         ("Animal", d["animal"]), ("Source", d["source_db"]), ("Shows", d["capability"]),
         ("Status", d["status"]), ("Repo", f'<a href="{esc(d["repo_url"])}">{esc(d["repo_url"].replace("https://", ""))}</a>'),
-        ("Run it in", f"{minutes} min ({seconds} s measured, median of 3 cold runs; see <code>pg/bench.txt</code>)"),
+        ("Run it in", f"{minutes} min ({seconds} s measured, {esc(note)}; see <code>pg/bench.txt</code>)"),
     ]
     dl = "".join(f"<dt>{esc(k)}</dt><dd>{v if k in ('Repo', 'Run it in') else esc(v)}</dd>" for k, v in facts)
     run = "".join(f"<pre>{esc(cmd)}</pre>" for cmd in d["run"])
@@ -97,7 +100,7 @@ def dataset_page(template, d):
     head_extra = (f'<link rel="stylesheet" href="{PLAYER_CSS}">'
                   f'<script src="{PLAYER_JS}"></script>'
                   '<script>window.addEventListener("DOMContentLoaded", function () {'
-                  f'  AsciinemaPlayer.create("{esc(d["recording"])}", document.getElementById("player"), '
+                  f'  AsciinemaPlayer.create({json.dumps(d["recording"])}, document.getElementById("player"), '
                   '{cols: 100, rows: 28, idleTimeLimit: 2, poster: "npt:0:5", fit: "width", theme: "asciinema"});'
                   '});</script>')
     return render(template, title=f'{d["name"]} · {SITE_TITLE}', description=d["hook"], head_extra=head_extra, body=body, cta=CTA)

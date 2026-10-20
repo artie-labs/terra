@@ -21,11 +21,11 @@
       {"n": 1, "title": "Weigh-in", "ddl": "ALTER TABLE animals ADD COLUMN weight_kg numeric(6,2)", "tests": "column appears on the replica after the next row change; verify passes"},
       {"n": 2, "title": "A pangolin is sighted", "ddl": "ALTER TYPE animal_species ADD VALUE 'pangolin'", "tests": "a row with the new label replicates once the replica's enum has it"},
       {"n": 3, "title": "The herd outgrows int", "ddl": "ALTER TABLE animals ALTER COLUMN animal_id TYPE bigint (and observations)", "tests": "animal 3000000001 lands; column types match on both sides"},
-      {"n": 4, "title": "The collars come online", "ddl": "CREATE TABLE collar_pings (...)", "tests": "replica errors until the table exists and the subscription is refreshed, then copies the existing rows"},
-      {"n": 5, "title": "The naming committee", "ddl": "ALTER TABLE animals RENAME COLUMN name TO display_name", "tests": "replica errors with 'missing replicated column' until renamed, then retries the same transaction"},
+      {"n": 4, "title": "The collars come online", "ddl": "CREATE TABLE collar_pings (...)", "tests": "replica needs the table created and the subscription refreshed; the refresh copies the existing rows"},
+      {"n": 5, "title": "The naming committee", "ddl": "ALTER TABLE animals RENAME COLUMN name TO display_name", "tests": "rows before and after the rename carry different column names; the replica must accept both until it has caught up, or it stops for good"},
       {"n": 6, "title": "Rangers file structured reports", "ddl": "ALTER TABLE observations ADD COLUMN field_report jsonb", "tests": "JSON round-trips; the field-report query returns rows"},
       {"n": 7, "title": "Survey adds elevation", "ddl": "ALTER TABLE watering_holes ADD COLUMN elevation_m int NOT NULL DEFAULT 0", "tests": "only the 12 updated rows cross the wire; the backfill of defaults does not"},
-      {"n": 8, "title": "Status moves to the collars", "ddl": "ALTER TABLE animals DROP COLUMN status", "tests": "writer stops sending status; replica must drop it too or reject inserts"}
+      {"n": 8, "title": "Status moves to the collars", "ddl": "ALTER TABLE animals DROP COLUMN status", "tests": "writer stops sending status; replica must relax the NOT NULL first and drop the column only after catching up"}
     ]
   }
 ]

@@ -43,8 +43,12 @@ one_run() {
   docker compose -p "$project" up -d --wait --wait-timeout 600 postgres >/dev/null 2>&1
   t2=$(now)
   docker compose -p "$project" up -d --wait --wait-timeout 600 subscriber >/dev/null 2>&1
+  local waited=0
   until [ "$(psql "$SUB_DSN" -X -At -c "SELECT count(*) FILTER (WHERE srsubstate <> 'r') FROM pg_subscription_rel" 2>/dev/null)" = "0" ] \
-     && [ "$(psql "$SUB_DSN" -X -At -c "SELECT count(*) FROM pg_subscription_rel" 2>/dev/null)" != "0" ]; do sleep 1; done
+     && [ "$(psql "$SUB_DSN" -X -At -c "SELECT count(*) FROM pg_subscription_rel" 2>/dev/null)" != "0" ]; do
+    sleep 1; waited=$((waited + 1))
+    [ "$waited" -lt 600 ] || { echo "subscriber did not sync within 600s" >&2; return 1; }
+  done
   t3=$(now)
   python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --wait 300 >/dev/null
   t4=$(now)
@@ -52,8 +56,12 @@ one_run() {
 }
 
 results=()
+tmp=$(mktemp)
 for i in $(seq 1 "$runs"); do
-  r=$(one_run)
+  # Run in a subshell that keeps set -e, so a failed phase aborts instead of
+  # being recorded as a timing.
+  ( set -euo pipefail; one_run ) > "$tmp" || { echo "run $i failed; no bench.txt written" >&2; rm -f "$tmp"; exit 1; }
+  r=$(tail -1 "$tmp")
   echo "run $i: image_pull=$(cut -d' ' -f1 <<<"$r") seed_loaded=$(cut -d' ' -f2 <<<"$r") subscriber_synced=$(cut -d' ' -f3 <<<"$r") verify_pass=$(cut -d' ' -f4 <<<"$r") total=$(cut -d' ' -f5 <<<"$r")"
   results+=("$r")
 done
@@ -72,4 +80,5 @@ median() { # column index
   echo "verify_pass $(median 4)"
   echo "total $(median 5)"
 } > bench.txt
+rm -f "$tmp"
 echo "wrote bench.txt:"; cat bench.txt

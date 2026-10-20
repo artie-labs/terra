@@ -6,8 +6,10 @@
 -- the subscriber no longer include status. A subscriber that still has
 -- status NOT NULL with no default rejects every INSERT with a not-null
 -- violation and the apply worker stalls on it (docs/sources.md:
--- pg-lr-subscription, pg-lr-conflicts). UPDATEs still apply. The subscriber
--- fix is to drop the column too, or give it a default.
+-- pg-lr-subscription, pg-lr-conflicts). UPDATEs still apply. Dropping the
+-- subscriber column at the same moment is not safe either: rows that
+-- committed before the drop still carry status. events/subscriber/08 makes
+-- status nullable first and drops it after apply.sh confirms catch-up.
 --
 -- Artie (documented): for safety, columns are not dropped from the destination
 -- automatically. With "Enable hard deletes for columns" on, the first row that

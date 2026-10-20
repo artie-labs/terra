@@ -49,17 +49,24 @@ jobs:
       - name: Stream, then apply the eight events one at a time
         working-directory: pg
         run: |
-          python3 stream.py --dsn "$SOURCE_DSN" --rate 10 --quiet > /tmp/stream.log 2>&1 &
+          python3 stream.py --dsn "$SOURCE_DSN" --rate 10 > /tmp/stream.log 2>&1 &
           echo $! > /tmp/stream.pid
           sleep 5
           for n in 1 2 3 4 5 6 7 8; do
+            before=$(grep -c 'stream: tick' /tmp/stream.log || true)
             events/apply.sh "$n"
             # Every step must pass: with events/subscriber/ applied, the Postgres
             # docs say the apply worker retries until the schemas fit.
             python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --wait 180
+            # The writer must still be writing after the event, not stalled on it.
+            sleep 3
+            after=$(grep -c 'stream: tick' /tmp/stream.log || true)
+            [ "$after" -gt "$before" ] || { echo "stream.py stopped writing after event $n"; exit 1; }
           done
           kill "$(cat /tmp/stream.pid)"; sleep 2
           tail -3 /tmp/stream.log
+          failures=$(grep -c 'failed' /tmp/stream.log || true)
+          [ "$failures" -le 2 ] || { echo "stream.py failed $failures ticks"; exit 1; }
 
       - name: Final verify with the stream stopped
         working-directory: pg
@@ -82,3 +89,41 @@ jobs:
         if: always()
         working-directory: pg
         run: docker compose -p terra-ci down --volumes --remove-orphans
+
+  quick-start:
+    name: README path, events/apply.sh all under load
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Start source and subscriber from fresh volumes
+        working-directory: pg
+        run: |
+          docker compose -p terra-qs down --volumes --remove-orphans
+          docker compose -p terra-qs up --detach --wait --wait-timeout 240
+
+      - name: Run the three README commands back to back, writer at 40 ops/s
+        working-directory: pg
+        run: |
+          python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --wait 180
+          python3 stream.py --dsn "$SOURCE_DSN" --rate 40 --quiet > /tmp/stream.log 2>&1 &
+          echo $! > /tmp/stream.pid
+          sleep 5
+          events/apply.sh all
+          python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --wait 180
+          kill "$(cat /tmp/stream.pid)"; sleep 2
+          python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --wait 120
+          tail -2 /tmp/stream.log
+
+      - name: Print logs after failure
+        if: failure()
+        working-directory: pg
+        run: |
+          cat /tmp/stream.log || true
+          docker compose -p terra-qs logs subscriber
+
+      - name: Remove test volumes
+        if: always()
+        working-directory: pg
+        run: docker compose -p terra-qs down --volumes --remove-orphans
