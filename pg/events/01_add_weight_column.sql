@@ -15,7 +15,7 @@
 -- Destination after: animals has weight_kg. Rows updated below carry a weight;
 -- every other row has NULL.
 
-ALTER TABLE animals ADD COLUMN weight_kg numeric(6,2);
+ALTER TABLE animals ADD COLUMN IF NOT EXISTS weight_kg numeric(6,2);
 
 UPDATE animals
    SET weight_kg = CASE species

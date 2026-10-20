@@ -20,6 +20,19 @@ ALTER TYPE animal_species ADD VALUE IF NOT EXISTS 'pangolin';
 
 -- Fixed id, well above anything the seed or stream.py hands out, so the two
 -- writers never collide.
-INSERT INTO animals (animal_id, name, species, home_watering_hole_id, status, weight_kg)
-VALUES (900001, 'Kipenzi the Scaled', 'pangolin', 7, 'adult', 12.50)
-ON CONFLICT (animal_id) DO NOTHING;
+-- Re-runnable: picks name or display_name, and sends status only while the
+-- column still exists, so the file works before and after events 05 and 08.
+DO $$
+DECLARE
+  name_col text := CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                                     WHERE table_name = 'animals' AND column_name = 'name')
+                        THEN 'name' ELSE 'display_name' END;
+  has_status boolean := EXISTS (SELECT 1 FROM information_schema.columns
+                                WHERE table_name = 'animals' AND column_name = 'status');
+BEGIN
+  EXECUTE format(
+    'INSERT INTO animals (animal_id, %I, species, home_watering_hole_id, weight_kg%s) '
+    'VALUES (%s, %L, %L, %s, %s%s) ON CONFLICT (animal_id) DO NOTHING',
+    name_col, CASE WHEN has_status THEN ', status' ELSE '' END,
+    900001, 'Kipenzi the Scaled', 'pangolin', 7, 12.50, CASE WHEN has_status THEN ', ' || quote_literal('adult') ELSE '' END);
+END $$;

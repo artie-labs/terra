@@ -22,7 +22,7 @@ events/apply.sh all && python3 verify.py --wait 120
 
 Run the second command in its own terminal; it writes about ten rows a second until you stop it. The third applies the eight events to the source and to the subscriber, waiting for the subscriber to catch up where an event needs it, then checks that the subscriber matches. To take the events one at a time: `events/apply.sh 1`, then `python3 verify.py --wait 120`, and so on to 8. If the subscriber is not running, `apply.sh` stops; set `SUB_DSN=none` to apply to the source only, for example when Artie is the consumer.
 
-Ports: the source is on `localhost:5432`, the subscriber on `localhost:5433`, both as `postgres` with the password in `docker-compose.yml`. Reset everything with `docker compose -p terra down -v`.
+Ports: the source is on `localhost:5432` (all interfaces, since Artie has to reach it), the subscriber on `127.0.0.1:5433` only. Both use the `postgres` password in `docker-compose.yml`. Reset everything with `docker compose -p terra down -v`. The event files can be re-run; each one checks the current schema before it changes it.
 
 ## What you will see
 

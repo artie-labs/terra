@@ -53,14 +53,14 @@ jobs:
           echo $! > /tmp/stream.pid
           sleep 5
           for n in 1 2 3 4 5 6 7 8; do
-            before=$(grep -c 'stream: tick' /tmp/stream.log || true)
+            before=$(grep -c ' ops  totals ' /tmp/stream.log || true)
             events/apply.sh "$n"
             # Every step must pass: with events/subscriber/ applied, the Postgres
             # docs say the apply worker retries until the schemas fit.
             python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --wait 180
             # The writer must still be writing after the event, not stalled on it.
             sleep 3
-            after=$(grep -c 'stream: tick' /tmp/stream.log || true)
+            after=$(grep -c ' ops  totals ' /tmp/stream.log || true)
             [ "$after" -gt "$before" ] || { echo "stream.py stopped writing after event $n"; exit 1; }
           done
           kill "$(cat /tmp/stream.pid)"; sleep 2

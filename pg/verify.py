@@ -91,8 +91,10 @@ class PostgresSide:
         ))
         return [r[0] for r in rows]
 
-    def summary(self, table, columns, pk):
-        cols = [c for c in sorted(columns) if not c.startswith("__artie_")]
+    def summary(self, table, columns, pk, use_columns=None):
+        # The checksum covers use_columns when given (the columns both sides
+        # share), so an extra destination column cannot change it.
+        cols = [c for c in sorted(use_columns or columns) if not c.startswith("__artie_")]
         where = "WHERE NOT coalesce(__artie_delete, false)" if "__artie_delete" in columns else ""
         row_text = ", ".join(f"coalesce({quote(c)}::text, '{NULL_TOKEN}')" for c in cols)
         order = ", ".join(quote(c) for c in pk) if pk else "1"
@@ -102,7 +104,8 @@ class PostgresSide:
             f"FROM {quote(self.schema)}.{quote(table)} {where}) s"
         )
         count, checksum = psql_rows(self.dsn, sql)[0]
-        return {"rows": int(count), "checksum": checksum, "columns": {c: columns[c] for c in cols}}
+        all_cols = [c for c in sorted(columns) if not c.startswith("__artie_")]
+        return {"rows": int(count), "checksum": checksum, "columns": {c: columns[c] for c in all_cols}}
 
 
 class SnowflakeSide:
@@ -169,18 +172,20 @@ def compare_once(source, dest, dest_type, tables, allow_extra):
     for table in tables:
         src_cols = source.columns(table)
         pk = source.primary_key(table)
-        src = source.summary(table, src_cols, pk)
         problems = []
+        dst = None
         try:
             dst_cols = dest.columns(table)
             if not dst_cols:
                 problems.append("missing on destination")
-                dst = None
+                shared = None
             else:
-                dst = dest.summary(table, dst_cols, pk)
+                shared = [c for c in src_cols if c in dst_cols] or list(src_cols)
+                dst = dest.summary(table, dst_cols, pk, shared) if dest_type == "postgres" else dest.summary(table, dst_cols, pk)
         except RuntimeError as error:
             problems.append(str(error).splitlines()[0][:120])
-            dst = None
+            shared = None
+        src = source.summary(table, src_cols, pk, shared)
         if dst is not None:
             missing = sorted(set(src["columns"]) - set(dst["columns"]))
             extra = sorted(set(dst["columns"]) - set(src["columns"]))

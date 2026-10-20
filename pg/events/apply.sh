@@ -54,7 +54,9 @@ wait_caught_up() {
   psql "$SOURCE_DSN" -X -q -c "UPDATE watering_holes SET created_at = created_at WHERE watering_hole_id = 1"
   deadline=$((SECONDS + CATCHUP_TIMEOUT))
   while :; do
-    applied=$(psql "$SUB_DSN" -X -Atc "SELECT coalesce(max(remote_lsn), '0/0') FROM pg_replication_origin_status")
+    # Only the subscription's own origin (pg_<suboid>). Table synchronization
+    # workers use separate origins whose LSN can run ahead of the apply worker.
+    applied=$(psql "$SUB_DSN" -X -Atc "SELECT coalesce(s.remote_lsn, '0/0') FROM pg_subscription sub LEFT JOIN pg_replication_origin_status s ON s.external_id = 'pg_' || sub.oid WHERE sub.subname = 'terra_sub'")
     if [ "$(psql "$SUB_DSN" -X -Atc "SELECT '$applied'::pg_lsn >= '$mark'::pg_lsn")" = "t" ]; then
       echo "== subscriber caught up to $mark"; return 0
     fi

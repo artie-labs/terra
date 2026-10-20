@@ -38,11 +38,11 @@ one_run() {
   if [ "$cold" = 1 ]; then docker image rm -f postgres:16 >/dev/null 2>&1 || true; fi
   local t0 t1 t2 t3 t4
   t0=$(now)
-  docker compose -p "$project" pull -q >/dev/null 2>&1
+  docker compose -p "$project" pull -q >/dev/null 2>&1 || return 1
   t1=$(now)
-  docker compose -p "$project" up -d --wait --wait-timeout 600 postgres >/dev/null 2>&1
+  docker compose -p "$project" up -d --wait --wait-timeout 600 postgres >/dev/null 2>&1 || return 1
   t2=$(now)
-  docker compose -p "$project" up -d --wait --wait-timeout 600 subscriber >/dev/null 2>&1
+  docker compose -p "$project" up -d --wait --wait-timeout 600 subscriber >/dev/null 2>&1 || return 1
   local waited=0
   until [ "$(psql "$SUB_DSN" -X -At -c "SELECT count(*) FILTER (WHERE srsubstate <> 'r') FROM pg_subscription_rel" 2>/dev/null)" = "0" ] \
      && [ "$(psql "$SUB_DSN" -X -At -c "SELECT count(*) FROM pg_subscription_rel" 2>/dev/null)" != "0" ]; do
@@ -50,7 +50,7 @@ one_run() {
     [ "$waited" -lt 600 ] || { echo "subscriber did not sync within 600s" >&2; return 1; }
   done
   t3=$(now)
-  python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --wait 300 >/dev/null
+  python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --wait 300 >/dev/null || return 1
   t4=$(now)
   echo "$((t1-t0)) $((t2-t1)) $((t3-t2)) $((t4-t3)) $((t4-t0))"
 }
@@ -58,10 +58,16 @@ one_run() {
 results=()
 tmp=$(mktemp)
 for i in $(seq 1 "$runs"); do
-  # Run in a subshell that keeps set -e, so a failed phase aborts instead of
-  # being recorded as a timing.
-  ( set -euo pipefail; one_run ) > "$tmp" || { echo "run $i failed; no bench.txt written" >&2; rm -f "$tmp"; exit 1; }
+  # Every step in one_run returns 1 on failure, and the subshell is not part
+  # of an || or if, so bash does not suspend errexit inside it. Check the
+  # status explicitly so a failed run is never recorded as a timing.
+  set +e
+  ( set -euo pipefail; one_run ) > "$tmp"
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then echo "run $i failed (exit $status); no bench.txt written" >&2; rm -f "$tmp"; exit 1; fi
   r=$(tail -1 "$tmp")
+  case "$r" in *[!0-9\ ]*|"") echo "run $i produced no timing; no bench.txt written" >&2; rm -f "$tmp"; exit 1 ;; esac
   echo "run $i: image_pull=$(cut -d' ' -f1 <<<"$r") seed_loaded=$(cut -d' ' -f2 <<<"$r") subscriber_synced=$(cut -d' ' -f3 <<<"$r") verify_pass=$(cut -d' ' -f4 <<<"$r") total=$(cut -d' ' -f5 <<<"$r")"
   results+=("$r")
 done

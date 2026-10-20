@@ -52,7 +52,9 @@ services:
       # Must match the artie role password in init/03_artie.sql.
       TERRA_ARTIE_PASSWORD: ${TERRA_ARTIE_PASSWORD:-change-me-to-a-long-random-string}
     ports:
-      - "5433:5432"
+      # Localhost only: the subscriber is a local stand-in and keeps the
+      # default password. Only the source is meant to be reachable from outside.
+      - "127.0.0.1:5433:5432"
     volumes:
       - ./init/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
       - ./subscriber/02_subscribe.sh:/docker-entrypoint-initdb.d/02_subscribe.sh:ro
@@ -64,8 +66,8 @@ services:
       retries: 150
 
 volumes:
+  # Both volumes take the Compose project name as prefix, so `-p terra` gives
+  # terra_terra_pgdata (the name earlier versions pinned explicitly) and other
+  # project names, such as CI's, get their own volumes.
   terra_pgdata:
-    # Keep the root-layout volume name so existing local Terra data is reused
-    # after the source directories are reorganized.
-    name: terra_terra_pgdata
   terra_subdata:

@@ -122,6 +122,16 @@ class Writer:
             "SELECT observation_id FROM observations ORDER BY observation_id DESC LIMIT 200"
         )]
         self.totals = {"obs+": 0, "obs-": 0, "animal+": 0, "animal~": 0, "ping+": 0}
+        self.pending = {}
+
+    def count(self, key):
+        # Counted into totals only once the batch commits.
+        self.pending[key] = self.pending.get(key, 0) + 1
+
+    def committed(self):
+        for key, value in self.pending.items():
+            self.totals[key] += value
+        self.pending = {}
 
     def resync(self):
         db = self.db
@@ -166,7 +176,7 @@ class Writer:
             vals.append(sql_text(self.field_report()) + "::jsonb")
         self.live_observations.append(self.next_observation)
         self.next_observation += 1
-        self.totals["obs+"] += 1
+        self.count("obs+")
         return f"INSERT INTO observations ({', '.join(cols)}) VALUES ({', '.join(vals)});"
 
     def delete_observation(self, schema):
@@ -174,7 +184,7 @@ class Writer:
             return None
         idx = self.rng.randrange(len(self.live_observations))
         observation_id = self.live_observations.pop(idx)
-        self.totals["obs-"] += 1
+        self.count("obs-")
         return f"DELETE FROM observations WHERE observation_id = {observation_id};"
 
     def insert_animal(self, schema):
@@ -192,7 +202,7 @@ class Writer:
             vals.append(f"{r.uniform(2, 6000):.2f}")
         self.animal_ids.append(self.next_animal)
         self.next_animal += 1
-        self.totals["animal+"] += 1
+        self.count("animal+")
         return f"INSERT INTO animals ({', '.join(cols)}) VALUES ({', '.join(vals)});"
 
     def update_animal(self, schema):
@@ -202,12 +212,12 @@ class Writer:
             sets.append(f"status = {sql_text(r.choice(STATUSES))}")
         if schema.has("animals", "weight_kg"):
             sets.append(f"weight_kg = {r.uniform(2, 6000):.2f}")
-        self.totals["animal~"] += 1
+        self.count("animal~")
         return f"UPDATE animals SET {', '.join(sets)} WHERE animal_id = {r.choice(self.animal_ids)};"
 
     def insert_ping(self, schema):
         r = self.rng
-        self.totals["ping+"] += 1
+        self.count("ping+")
         return (
             "INSERT INTO collar_pings (animal_id, watering_hole_id, pinged_at, latitude, longitude, battery_pct) "
             f"VALUES ({r.choice(self.animal_ids)}, {r.choice(self.hole_ids)}, now(), "
@@ -260,21 +270,27 @@ def main():
         if args.duration and time.monotonic() - started >= args.duration:
             break
         tick_started = time.monotonic()
-        schema = Schema(db)
-        description = schema.describe()
-        if description != last_schema:
-            print(f"stream: schema {description}", flush=True)
-            last_schema = description
-        statements = writer.batch(schema, args.rate)
         try:
+            schema = Schema(db)
+            description = schema.describe()
+            if description != last_schema:
+                print(f"stream: schema {description}", flush=True)
+                last_schema = description
+            statements = writer.batch(schema, args.rate)
             db.run("BEGIN;\n" + "\n".join(statements) + "\nCOMMIT;\n")
         except RuntimeError as error:
-            # Something else wrote to the table (an event file, a human). Resync
-            # the id counters from the database and carry on with the next tick.
+            # Something else wrote to the table (an event file, a human), or the
+            # database is briefly unavailable. Nothing from this tick was
+            # committed. Resync the id counters and carry on with the next tick.
             print(f"stream: tick {tick} failed: {error.args[0].splitlines()[0]}", file=sys.stderr, flush=True)
-            writer.resync()
+            writer.pending = {}
+            try:
+                writer.resync()
+            except RuntimeError:
+                pass
             time.sleep(1)
             continue
+        writer.committed()
         tick += 1
         if not args.quiet:
             totals = " ".join(f"{k}{v}" for k, v in writer.totals.items())

@@ -26,9 +26,22 @@ ALTER TABLE animals      ALTER COLUMN animal_id TYPE bigint;
 ALTER TABLE observations ALTER COLUMN animal_id TYPE bigint;
 COMMIT;
 
-INSERT INTO animals (animal_id, name, species, home_watering_hole_id, status, weight_kg)
-VALUES (3000000001, 'Mkubwa Sana', 'elephant', 2, 'adult', 5100.00)
-ON CONFLICT (animal_id) DO NOTHING;
+-- Re-runnable: picks name or display_name, and sends status only while the
+-- column still exists, so the file works before and after events 05 and 08.
+DO $$
+DECLARE
+  name_col text := CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                                     WHERE table_name = 'animals' AND column_name = 'name')
+                        THEN 'name' ELSE 'display_name' END;
+  has_status boolean := EXISTS (SELECT 1 FROM information_schema.columns
+                                WHERE table_name = 'animals' AND column_name = 'status');
+BEGIN
+  EXECUTE format(
+    'INSERT INTO animals (animal_id, %I, species, home_watering_hole_id, weight_kg%s) '
+    'VALUES (%s, %L, %L, %s, %s%s) ON CONFLICT (animal_id) DO NOTHING',
+    name_col, CASE WHEN has_status THEN ', status' ELSE '' END,
+    3000000001, 'Mkubwa Sana', 'elephant', 2, 5100.00, CASE WHEN has_status THEN ', ' || quote_literal('adult') ELSE '' END);
+END $$;
 
 INSERT INTO observations (observation_id, animal_id, watering_hole_id, observed_at, notes)
 VALUES (9000000001, 3000000001, 2, now(),

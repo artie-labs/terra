@@ -21,6 +21,12 @@
 -- the old column requires "Enable hard deletes for columns" and a 4 hour
 -- verification window (docs/sources.md: artie-schema-evolution).
 
-ALTER TABLE animals RENAME COLUMN name TO display_name;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'animals' AND column_name = 'name') THEN
+    ALTER TABLE animals RENAME COLUMN name TO display_name;
+  END IF;
+END $$;
 
 UPDATE animals SET updated_at = now() WHERE animal_id <= 5;
