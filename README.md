@@ -1,48 +1,16 @@
 # Terra
 
-Terra provides self-contained source datasets for exercising Artie backfills, CDC streaming, and schema evolution. Choose one dataset; each folder owns its own Docker configuration, seed data, source-specific exercises, and connection instructions.
+Terra is a set of self-contained source databases for exercising change data capture: a seeded database, a writer that keeps changing it, and schema changes you apply on purpose to see what a replication consumer does with them. Each dataset is one source database and one capability. The Postgres dataset is the one that is finished: it ships a subscriber stand-in, a verifier, measured run time, and a published page at artie.world.
 
 ## Datasets
 
-- [PostgreSQL](pg/README.md) — relational safari dataset with logical replication, deterministic seed generation, and `ALTER TABLE` schema-evolution exercises.
-- [MongoDB](mongo/README.md) — replica-set-backed document dataset with Change Stream exercises and optional bounded source workloads.
+- [PostgreSQL](pg/README.md): safari animals, logical replication, eight schema events, a Postgres subscriber as an offline consumer, `verify.py`.
+- [MongoDB](mongo/README.md): replica-set document dataset with Change Stream exercises. Not part of the v0.1 release.
 
-## Shared scenarios
+## License
 
-Each dataset is designed to support the same Artie workflow:
+Code is Apache-2.0 ([LICENSE](LICENSE)). The generated data is synthetic and released under CC0.
 
-1. Start the selected source and follow its README to create the least-privilege Artie service account.
-2. Create an Artie source using the connection details from that dataset's README.
-3. Start a pipeline and verify the initial backfill in the selected destination.
-4. Run the source-specific change exercises and verify that inserts, updates, and additive schema changes stream downstream.
+## Cite
 
-The expected destination schema and behavior for destructive changes are destination-specific. Terra validates source fixtures only; use the relevant Artie pipeline and destination documentation when validating destination mapping.
-
-## Repository layout
-
-```text
-terra/
-├── README.md
-├── pg/
-│   ├── README.md
-│   ├── docker-compose.yml
-│   ├── generate_seed.py
-│   └── init/
-│       ├── 01_schema.sql
-│       ├── 02_seed.sql
-│       └── 03_artie.sql
-└── mongo/
-    ├── README.md
-    ├── compose.yml
-    ├── generate_seed.py
-    ├── exercises.js
-    ├── workload.py
-    └── init/
-```
-
-Run Compose and seed commands from the dataset directory, for example:
-
-```bash
-cd pg
-docker compose -p terra up -d
-```
+See [CITATION.cff](CITATION.cff). Short form: Artie Technologies, Inc. (2026). Terra: live CDC source datasets, v0.1.0. https://github.com/artie-labs/terra
