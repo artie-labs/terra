@@ -58,9 +58,14 @@ jobs:
             # Every step must pass: with events/subscriber/ applied, the Postgres
             # docs say the apply worker retries until the schemas fit.
             python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --wait 180
-            # The writer must still be writing after the event, not stalled on it.
-            sleep 3
-            after=$(grep -c ' ops  totals ' /tmp/stream.log || true)
+            # At least one batch must commit within 20 s of the event, so the
+            # writer is not stalled on it. Only committed ticks count (failed
+            # ticks print a different line).
+            for i in $(seq 1 20); do
+              after=$(grep -c ' ops  totals ' /tmp/stream.log || true)
+              [ "$after" -gt "$before" ] && break
+              sleep 1
+            done
             [ "$after" -gt "$before" ] || { echo "stream.py stopped writing after event $n"; exit 1; }
           done
           kill "$(cat /tmp/stream.pid)" 2>/dev/null || echo "writer had already exited"
@@ -131,7 +136,17 @@ jobs:
           psql "$SUB_DSN" -X -q -c "ALTER TABLE animals ADD COLUMN legacy_note text DEFAULT 'kept'"
           if python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --wait 5; then echo "expected FAIL"; exit 1; fi
           python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --allow-extra-columns --wait 60
-          python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --allow-extra-columns --ignore-types --wait 60
+          python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --allow-extra-columns --ignore-types --dest-schema public --wait 60
+          python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --allow-extra-columns --no-checksum --wait 60
+          # Soft-deleted destination rows must be skipped by every mode.
+          psql "$SUB_DSN" -X -q -c "ALTER TABLE observations ADD COLUMN __artie_delete boolean DEFAULT false"
+          psql "$SUB_DSN" -X -q -c "INSERT INTO observations (observation_id, animal_id, watering_hole_id, observed_at, notes, __artie_delete) VALUES (9900000001, 1, 1, now(), 'soft deleted', true)"
+          python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --allow-extra-columns --wait 60
+          python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --allow-extra-columns --no-checksum --wait 60
+          # A nulled display_name fails by default and passes when excluded.
+          psql "$SUB_DSN" -X -q -c "ALTER TABLE animals ALTER COLUMN display_name DROP NOT NULL; UPDATE animals SET display_name = NULL WHERE animal_id <= 3"
+          if python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --allow-extra-columns --wait 5; then echo "expected FAIL"; exit 1; fi
+          python3 verify.py --source "$SOURCE_DSN" --dest "$SUB_DSN" --allow-extra-columns --exclude-columns animals.display_name --wait 60
 
       - name: Print logs after failure
         if: failure()

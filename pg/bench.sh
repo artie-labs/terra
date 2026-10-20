@@ -33,7 +33,8 @@ admin_pw="${TERRA_ADMIN_PASSWORD:-change-me-admin-password}"
 SOURCE_DSN="${SOURCE_DSN:-postgresql://postgres:${admin_pw}@localhost:5432/terra}"
 SUB_DSN="${SUB_DSN:-postgresql://postgres:${admin_pw}@localhost:5433/terra}"
 # Honours Docker's own variable, so COMPOSE_PROJECT_NAME=terra-ci bench.sh
-# keeps its volumes apart from a local `-p terra` stack.
+# keeps its volumes apart from a local `-p terra` stack. The two cannot run at
+# the same time, because both bind ports 5432 and 5433.
 project="${COMPOSE_PROJECT_NAME:-terra}"
 
 now() { date +%s; }

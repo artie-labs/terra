@@ -79,7 +79,9 @@ def dataset_page(template, d):
             f"<dl>{dl}</dl>"
             "<h2>Run it</h2>" + run +
             "<p>The third command keeps writing until you stop it; run it in its own terminal. "
-            "The fourth applies the eight events and checks the replica after each.</p>"
+            "The fourth applies the eight events, waiting for the replica to catch up where an event needs it, "
+            "then checks the replica. To check after each event, run <code>events/apply.sh N</code> and "
+            "<code>python3 verify.py --wait 120</code> for N from 1 to 8.</p>"
             "<h2>Recording</h2>"
             f'<div class="player" id="player"></div>'
             f'<p><a href="{esc(d["recording"])}">{esc(d["recording"])}</a>: compose up, the stream, the eight events, verify passing. Real output, not mocked.</p>'
@@ -89,7 +91,7 @@ def dataset_page(template, d):
             "<h2>Events</h2>"
             f'<table><tr><th>#</th><th>Event</th><th>What to look for</th></tr>{rows}</table>'
             '<p>Each event file says what Postgres emits, what Artie documents, and what the destination should look like. '
-            'What a native Postgres subscriber actually did, including the two events it broke on, is in '
+            'What a native Postgres subscriber actually did, including the run where it was given no DDL and stalled, is in '
             '<a href="https://github.com/artie-labs/terra/blob/master/docs/events-observed.md">docs/events-observed.md</a>.</p>')
     head_extra = (f'<link rel="stylesheet" href="{PLAYER_CSS}" integrity="{PLAYER_CSS_SRI}" crossorigin="anonymous">'
                   f'<script src="{PLAYER_JS}" integrity="{PLAYER_JS_SRI}" crossorigin="anonymous"></script>'

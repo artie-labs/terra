@@ -33,4 +33,4 @@ INSERT INTO collar_pings (animal_id, watering_hole_id, pinged_at, latitude, long
 SELECT a.animal_id, a.home_watering_hole_id, now(), w.latitude, w.longitude, 98
   FROM animals a JOIN watering_holes w ON w.watering_hole_id = a.home_watering_hole_id
  WHERE a.animal_id <= 12
-   AND NOT EXISTS (SELECT 1 FROM collar_pings);
+   AND NOT EXISTS (SELECT 1 FROM collar_pings p WHERE p.animal_id = a.animal_id AND p.battery_pct = 98);

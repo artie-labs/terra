@@ -229,7 +229,8 @@ class Writer:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--dsn", default=os.environ.get("TERRA_DSN", DEFAULT_DSN))
+    parser.add_argument("--dsn", default=os.environ.get("SOURCE_DSN", os.environ.get("TERRA_DSN", DEFAULT_DSN)),
+                        help="source database; defaults to $SOURCE_DSN, then $TERRA_DSN, then localhost:5432")
     parser.add_argument("--rate", type=int, default=10, help="operations per second (default 10)")
     parser.add_argument("--duration", type=float, default=0, help="seconds to run; 0 means until interrupted")
     parser.add_argument("--seed", type=int, default=42)
@@ -237,7 +238,10 @@ def main():
     args = parser.parse_args()
 
     db = Psql(args.dsn)
-    writer = Writer(db, args.seed)
+    try:
+        writer = Writer(db, args.seed)
+    except RuntimeError as error:
+        sys.exit(f"stream: cannot read the source at {args.dsn.split('@')[-1]}: {error.args[0].splitlines()[0]}")
     stop = {"now": False}
 
     def handle(signum, frame):

@@ -217,8 +217,11 @@ def compare_once(source, dest, dest_type, tables, allow_extra, ignore_types=Fals
                     problems.append("checksum differs")
                 if no_checksum and pk:
                     sums = []
-                    for side in (source, dest):
-                        sums.append(int(psql_rows(side.dsn, f"SELECT coalesce(sum({quote(pk[0])}), 0) FROM {quote(side.schema)}.{quote(table)}")[0][0]))
+                    for side, cols in ((source, src_cols), (dest, dst_cols)):
+                        # Same soft-delete filter as the row count and checksum.
+                        where = "WHERE NOT coalesce(__artie_delete, false)" if "__artie_delete" in cols else ""
+                        sums.append(int(psql_rows(side.dsn, (
+                            f"SELECT coalesce(sum({quote(pk[0])}), 0) FROM {quote(side.schema)}.{quote(table)} {where}"))[0][0]))
                     if sums[0] != sums[1]:
                         problems.append("primary key sum differs")
             else:

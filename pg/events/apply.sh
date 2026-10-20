@@ -85,7 +85,7 @@ fi
 
 for n in "$@"; do
   case "$n" in *[!0-9]*|"") echo "event numbers must be integers 1 to 8, got '$n'" >&2; exit 2 ;; esac
-  nn=$(printf "%02d" "$n")
+  nn=$(printf "%02d" "$((10#$n))")   # 10# so 08 and 09 are not read as octal
   src=$( (ls "$here"/"${nn}"_*.sql 2>/dev/null || true) | head -1)
   [ -n "$src" ] || { echo "no event ${nn}: files are $(ls "$here"/*.sql | xargs -n1 basename | tr '\n' ' ')" >&2; exit 1; }
   sub=$( (ls "$here"/subscriber/"${nn}"_*.sql 2>/dev/null || true) | head -1)
