@@ -1,0 +1,10 @@
+# pg/bench.txt is written by pg/bench.sh; do not edit by hand.
+# median of 3 run(s) on 2026-10-20T16:29:02Z, Darwin arm64, docker 29.5.2, image pulled
+# run: 11 3 3 0 17
+# run: 23 3 4 0 30
+# run: 23 3 3 0 29
+image_pull 23
+seed_loaded 3
+subscriber_synced 3
+verify_pass 0
+total 29
