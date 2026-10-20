@@ -59,7 +59,7 @@ def index_page(template, datasets):
             'numbered schema changes to apply on purpose, and a verifier that compares source and destination after each one. '
             'Point any replication tool at it. The code is Apache-2.0 and the data is synthetic.</p>'
             '<p><a href="https://github.com/artie-labs/terra">github.com/artie-labs/terra</a></p>')
-    return render(template, title=SITE_TITLE, description=SITE_LINE, head_extra="", body=body, cta=CTA)
+    return render(template, title=esc(SITE_TITLE), description=esc(SITE_LINE), head_extra="", body=body, cta=CTA)
 
 
 def dataset_page(template, d):
@@ -78,28 +78,23 @@ def dataset_page(template, d):
             f'<h1>{esc(d["name"])}</h1><p class="lede">{esc(d["hook"])}</p>'
             f"<dl>{dl}</dl>"
             "<h2>Run it</h2>" + run +
-            "<p>The third command keeps writing until you stop it; run it in its own terminal. "
-            "The fourth applies the eight events, waiting for the replica to catch up where an event needs it, "
-            "then checks the replica. To check after each event, run <code>events/apply.sh N</code> and "
-            "<code>python3 verify.py --wait 120</code> for N from 1 to 8.</p>"
+            f'<p>{esc(d["run_note"])}</p>'
             "<h2>Recording</h2>"
             f'<div class="player" id="player"></div>'
-            f'<p><a href="{esc(d["recording"])}">{esc(d["recording"])}</a>: compose up, the stream, the eight events, verify passing. Real output, not mocked.</p>'
+            f'<p><a href="{esc(d["recording"])}">{esc(d["recording"])}</a>: {esc(d["recording_note"])}</p>'
             "<h2>Schema after the events</h2>"
-            f'<img class="schema" src="{esc(d["schema_image"])}" alt="Schema diagram of {esc(d["name"])} after all eight events">'
-            "<p>Generated from <code>information_schema</code> at the end of the sequence by <code>pg/schema_svg.py</code>.</p>"
+            f'<img class="schema" src="{esc(d["schema_image"])}" alt="Schema diagram of {esc(d["name"])} after all events">'
+            f'<p>{esc(d["schema_note"])}</p>'
             "<h2>Events</h2>"
             f'<table><tr><th>#</th><th>Event</th><th>What to look for</th></tr>{rows}</table>'
-            '<p>Each event file says what Postgres emits, what Artie documents, and what the destination should look like. '
-            'What a native Postgres subscriber actually did, including the run where it was given no DDL and stalled, is in '
-            '<a href="https://github.com/artie-labs/terra/blob/master/docs/events-observed.md">docs/events-observed.md</a>.</p>')
+            f'<p>{esc(d["events_note"])} <a href="{esc(d["observed_url"])}">{esc(d["observed_url"].replace("https://github.com/", ""))}</a></p>')
     head_extra = (f'<link rel="stylesheet" href="{PLAYER_CSS}" integrity="{PLAYER_CSS_SRI}" crossorigin="anonymous">'
                   f'<script src="{PLAYER_JS}" integrity="{PLAYER_JS_SRI}" crossorigin="anonymous"></script>'
                   '<script>window.addEventListener("DOMContentLoaded", function () {'
                   f'  AsciinemaPlayer.create({json.dumps(d["recording"])}, document.getElementById("player"), '
                   '{cols: 100, rows: 28, idleTimeLimit: 2, poster: "npt:0:5", fit: "width", theme: "asciinema"});'
                   '});</script>')
-    return render(template, title=f'{d["name"]} · {SITE_TITLE}', description=d["hook"], head_extra=head_extra, body=body, cta=CTA)
+    return render(template, title=esc(f'{d["name"]} · {SITE_TITLE}'), description=esc(d["hook"]), head_extra=head_extra, body=body, cta=CTA)
 
 
 def main():
@@ -114,10 +109,9 @@ def main():
         shutil.copy(HERE / d["schema_image"], OUT / d["schema_image"])
         rec = HERE / d["recording"]
         (OUT / rec.parent.name).mkdir(exist_ok=True)
-        if rec.exists():
-            shutil.copy(rec, OUT / d["recording"])
-        else:
-            print(f"warning: {rec} missing, player will show nothing")
+        if not rec.exists():
+            sys.exit(f"build: {rec} is missing; refusing to publish a page with an empty player")
+        shutil.copy(rec, OUT / d["recording"])
     (OUT / "CNAME").write_text("artie.world\n")
     (OUT / ".nojekyll").write_text("")
     print(f"built {OUT}: index.html + {len(datasets)} dataset page(s)")

@@ -8,11 +8,14 @@ on:
       - ".github/workflows/site.yml"
       - "site/**"
       - "pg/bench.txt"
+      - "pg/bench_readme.py"
   pull_request:
     paths:
       - ".github/workflows/site.yml"
       - "site/**"
       - "pg/bench.txt"
+      - "pg/bench_readme.py"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,7 +32,7 @@ jobs:
           path: site/_site
 
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master'
     needs: build
     runs-on: ubuntu-latest
     # Only the deploy job can publish; PR builds get read-only permissions.

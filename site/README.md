@@ -11,11 +11,11 @@ python3 -m http.server -d site/_site 8000
 
 ## Publishing
 
-`.github/workflows/site.yml` builds `site/_site` and deploys it to GitHub Pages on every push to `master` that touches `site/` or `pg/bench.txt`. Two things are manual:
+`.github/workflows/site.yml` builds `site/_site` and deploys it to GitHub Pages on every push to `master` that touches `site/`, `pg/bench.txt` or `pg/bench_readme.py`, and can be run by hand from the Actions tab (workflow_dispatch) for the first deploy. The build fails if the recording is missing, so a page with an empty player is never published. Two things are manual:
 
 1. Repository settings: Pages must be set to deploy from GitHub Actions (Settings, Pages, Source: GitHub Actions). Until then the deploy job fails.
-2. DNS for `artie.world`: `build.py` writes a `CNAME` file containing `artie.world`, so GitHub Pages expects the apex domain. At the DNS provider, create `A` records for `artie.world` pointing at GitHub Pages' four addresses (185.199.108.153, 185.199.109.153, 185.199.110.153, 185.199.111.153, check https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/managing-a-custom-domain-for-your-github-pages-site for the current list) and a `CNAME` record for `www.artie.world` pointing at `artie-labs.github.io`. Then enter `artie.world` under Settings, Pages, Custom domain and tick Enforce HTTPS once the certificate is issued.
+2. DNS for `artie.world`. When Pages deploys from a workflow, a `CNAME` file in the artifact is not what sets the domain; the custom domain is set in the repository settings (`build.py` still writes the file, which does no harm). At the DNS provider, create `A` records for `artie.world` pointing at GitHub Pages' four addresses (185.199.108.153, 185.199.109.153, 185.199.110.153, 185.199.111.153; check https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/managing-a-custom-domain-for-your-github-pages-site for the current list) and a `CNAME` record for `www.artie.world` pointing at `artie-labs.github.io`. Then enter `artie.world` under Settings, Pages, Custom domain and tick Enforce HTTPS once the certificate is issued.
 
 ## Adding a dataset
 
-Add an object to `datasets.json` with the same keys as the first one (`slug`, `name`, `animal`, `source_db`, `capability`, `hook`, `status`, `repo_url`, `bench_file`, `recording`, `schema_image`, `run`, `events`). Each event has `n`, `title`, `ddl`, `tests`. Commit its cast and SVG next to the existing ones.
+Add an object to `datasets.json` with the same keys as the first one. The page text that is specific to a dataset lives in that object (`run_note`, `recording_note`, `schema_note`, `events_note`, `observed_url`), not in `build.py`, so a second dataset needs only a JSON entry, its cast and its SVG. Each event has `n`, `title`, `ddl`, `tests`.

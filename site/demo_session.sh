@@ -20,6 +20,8 @@ done
 kill "$pid"; sleep 1
 show "tail -1 /tmp/demo-stream.log"
 tail -1 /tmp/demo-stream.log
-show "psql \$SUB -f queries.sql   # same three queries, on the subscriber"
-psql postgresql://postgres:change-me-admin-password@localhost:5433/terra -X -f queries.sql | head -20
-sleep 2
+show "psql \$SUB_DSN -f queries.sql   # same three queries, on the subscriber"
+# Do not pipe this into head: under pipefail the SIGPIPE would end the
+# recording early. The three queries fit on screen as they are.
+psql "postgresql://postgres:${TERRA_ADMIN_PASSWORD:-change-me-admin-password}@localhost:5433/terra" -X -P pager=off -f queries.sql
+sleep 3
