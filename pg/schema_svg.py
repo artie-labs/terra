@@ -12,7 +12,7 @@ import os
 import subprocess
 from xml.sax.saxutils import escape
 
-DEFAULT_DSN = "postgresql://postgres:change-me-admin-password@localhost:5432/terra"
+DEFAULT_DSN = f"postgresql://postgres:{os.environ.get('TERRA_ADMIN_PASSWORD', 'change-me-admin-password')}@localhost:5432/terra"
 ROW_H, PAD, COL_W, GAP_X, GAP_Y, FONT = 18, 10, 300, 70, 40, 13
 
 

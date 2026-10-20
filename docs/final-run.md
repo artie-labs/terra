@@ -13,21 +13,21 @@ logged zero errors.
 $ docker compose -p terra down -v
 Container terra-subscriber Removed 
 Container terra-postgres Removed 
-Volume terra_terra_pgdata Removed 
 Volume terra_terra_subdata Removed 
+Volume terra_terra_pgdata Removed 
 Network terra_default Removed 
 
 $ ./bench.sh --cold
-run 1: image_pull=14 seed_loaded=3 subscriber_synced=3 verify_pass=1 total=21
+run 1: image_pull=24 seed_loaded=3 subscriber_synced=4 verify_pass=0 total=31
 wrote bench.txt:
 # pg/bench.txt is written by pg/bench.sh; do not edit by hand.
-# median of 1 run(s) on 2026-10-20T21:53:32Z, Darwin arm64, docker 29.5.2, image pulled
-# run: 14 3 3 1 21
-image_pull 14
+# median of 1 run(s) on 2026-10-20T22:09:43Z, Darwin arm64, docker 29.5.2, image pulled
+# run: 24 3 4 0 31
+image_pull 24
 seed_loaded 3
-subscriber_synced 3
-verify_pass 1
-total 21
+subscriber_synced 4
+verify_pass 0
+total 31
 
 $ python3 verify.py --wait 120
 table            src rows   dst rows  cols  status
@@ -81,25 +81,26 @@ $ events/apply.sh 4
 == subscriber (after-publisher): 04_collar_pings_table.sql
 
 $ python3 verify.py --wait 120
+verify: waiting, 1 table(s) not matched yet: collar_pings
 table            src rows   dst rows  cols  status
 animals               157        157     8  ok
-collar_pings           15         15     7  ok
-observations         1479       1479     5  ok
+collar_pings           18         18     7  ok
+observations         1487       1487     5  ok
 watering_holes         12         12     6  ok
-verify: PASS (4 tables match, 1 attempt(s))
+verify: PASS (4 tables match, 2 attempt(s))
 
 $ events/apply.sh 5
 ### event 05: Event 05: The naming committee
 == subscriber (before-publisher): 05_rename_name_column.sql
 == source: 05_rename_name_column.sql
-== subscriber caught up to 0/1AFDC00
+== subscriber caught up to 0/1AFFBA8
 == subscriber (after-catchup): 05_rename_name_column.sql
 
 $ python3 verify.py --wait 120
 table            src rows   dst rows  cols  status
-animals               157        157     8  ok
-collar_pings           15         15     7  ok
-observations         1483       1483     5  ok
+animals               158        158     8  ok
+collar_pings           19         19     7  ok
+observations         1491       1491     5  ok
 watering_holes         12         12     6  ok
 verify: PASS (4 tables match, 1 attempt(s))
 
@@ -110,9 +111,9 @@ $ events/apply.sh 6
 
 $ python3 verify.py --wait 120
 table            src rows   dst rows  cols  status
-animals               157        157     8  ok
-collar_pings           16         16     7  ok
-observations         1483       1483     6  ok
+animals               158        158     8  ok
+collar_pings           24         24     7  ok
+observations         1494       1494     6  ok
 watering_holes         12         12     6  ok
 verify: PASS (4 tables match, 1 attempt(s))
 
@@ -123,9 +124,9 @@ $ events/apply.sh 7
 
 $ python3 verify.py --wait 120
 table            src rows   dst rows  cols  status
-animals               157        157     8  ok
-collar_pings           19         19     7  ok
-observations         1487       1487     6  ok
+animals               158        158     8  ok
+collar_pings           24         24     7  ok
+observations         1494       1494     6  ok
 watering_holes         12         12     7  ok
 verify: PASS (4 tables match, 1 attempt(s))
 
@@ -133,26 +134,26 @@ $ events/apply.sh 8
 ### event 08: Event 08: Status moves to the collars
 == subscriber (before-publisher): 08_drop_status_column.sql
 == source: 08_drop_status_column.sql
-== subscriber caught up to 0/1B05958
+== subscriber caught up to 0/1B07A78
 == subscriber (after-catchup): 08_drop_status_column.sql
 
 $ python3 verify.py --wait 120
 table            src rows   dst rows  cols  status
-animals               157        157     7  ok
-collar_pings           24         24     7  ok
-observations         1490       1490     6  ok
+animals               159        159     7  ok
+collar_pings           27         27     7  ok
+observations         1498       1498     6  ok
 watering_holes         12         12     7  ok
 verify: PASS (4 tables match, 1 attempt(s))
 
 $ tail -2 stream.log
-stream: tick    11  10 ops  totals obs+67 obs-8 animal+5 animal~18 ping+12
-stream: stopped after 11 ticks  totals obs+67 obs-8 animal+5 animal~18 ping+12
+stream: tick    13  10 ops  totals obs+77 obs-10 animal+7 animal~21 ping+15
+stream: stopped after 13 ticks  totals obs+77 obs-10 animal+7 animal~21 ping+15
 
 $ python3 verify.py --wait 120   # stream stopped
 table            src rows   dst rows  cols  status
-animals               157        157     7  ok
-collar_pings           24         24     7  ok
-observations         1490       1490     6  ok
+animals               159        159     7  ok
+collar_pings           27         27     7  ok
+observations         1498       1498     6  ok
 watering_holes         12         12     7  ok
 verify: PASS (4 tables match, 1 attempt(s))
 
@@ -160,44 +161,42 @@ $ psql $SUB_DSN -f queries.sql
 -- 1. observations per watering hole
   watering_hole  |          region          | observations 
 -----------------+--------------------------+--------------
- Baobab Dam      | Kruger, South Africa     |          186
- Ochre Seep      | Etosha, Namibia          |          165
+ Baobab Dam      | Kruger, South Africa     |          185
+ Ochre Seep      | Etosha, Namibia          |          166
  Thornbush Pan   | Hluhluwe, South Africa   |          160
- Acacia Pan      | Maasai Mara, Kenya       |          139
+ Acacia Pan      | Maasai Mara, Kenya       |          138
  Reed Lagoon     | Okavango Delta, Botswana |          130
  Dawn Pool       | Hwange, Zimbabwe         |          124
- Mopane Crossing | Chobe, Botswana          |          117
+ Mopane Crossing | Chobe, Botswana          |          121
  Elephant Spring | Amboseli, Kenya          |          113
- Riverbend Pool  | South Luangwa, Zambia    |          105
+ Riverbend Pool  | South Luangwa, Zambia    |          107
  Crater Basin    | Ngorongoro, Tanzania     |           91
- Kopje Pool      | Serengeti, Tanzania      |           87
- Miombo Spring   | Kafue, Zambia            |           73
+ Kopje Pool      | Serengeti, Tanzania      |           91
+ Miombo Spring   | Kafue, Zambia            |           72
 (12 rows)
 
 -- 2. verified field reports per ranger (event 06)
  ranger | reports | verified | usual_weather 
 --------+---------+----------+---------------
  A.M.   |      26 |       26 | clear
- J.T.   |       2 |        1 | overcast
- L.O.   |       2 |        1 | dust haze
- R.K.   |       2 |        1 | dust haze
- D.C.   |       1 |        1 | light rain
- S.P.   |       1 |        1 | overcast
-(6 rows)
+ S.P.   |       3 |        0 | clear
+ L.O.   |       2 |        0 | light rain
+ R.K.   |       1 |        1 | light rain
+(4 rows)
 
 -- 3. latest collar ping per animal (events 04, 05, 07)
-       display_name       |    species     |      near       | elevation_m |           pinged_at           | battery_pct 
---------------------------+----------------+-----------------+-------------+-------------------------------+-------------
- Nia                      | giraffe        | Mopane Crossing |         930 | 2026-10-20 21:53:43.27938+00  |          31
- Baraka #120              | elephant       | Reed Lagoon     |         950 | 2026-10-20 21:53:43.27938+00  |          16
- Moyo the Watchful        | plains_zebra   | Mopane Crossing |         930 | 2026-10-20 21:53:43.27938+00  |           6
- Safi                     | plains_zebra   | Dawn Pool       |        1000 | 2026-10-20 21:53:43.27938+00  |          93
- Jabari of the Delta #154 | spotted_hyena  | Ochre Seep      |        1100 | 2026-10-20 21:53:43.27938+00  |          93
- Pendo of the Plains      | hippopotamus   | Kopje Pool      |        1500 | 2026-10-20 21:53:42.273646+00 |          47
- Rafiki #141              | common_warthog | Acacia Pan      |        1600 | 2026-10-20 21:53:42.273646+00 |          95
- Rafiki Jr. #91           | impala         | Dawn Pool       |        1000 | 2026-10-20 21:53:42.273646+00 |          46
- Safi #111                | impala         | Ochre Seep      |        1100 | 2026-10-20 21:53:41.267201+00 |          18
- Imani the Watchful       | hippopotamus   | Ochre Seep      |        1100 | 2026-10-20 21:53:40.255834+00 |          38
+    display_name     |     species     |     near      | elevation_m |           pinged_at           | battery_pct 
+---------------------+-----------------+---------------+-------------+-------------------------------+-------------
+ Lulu #8             | impala          | Crater Basin  |        1700 | 2026-10-20 22:09:56.449108+00 |          73
+ Jabari              | elephant        | Crater Basin  |        1700 | 2026-10-20 22:09:56.449108+00 |          36
+ Duma #113           | plains_zebra    | Dawn Pool     |        1000 | 2026-10-20 22:09:56.449108+00 |          99
+ Moyo #100           | hippopotamus    | Baobab Dam    |         300 | 2026-10-20 22:09:55.448418+00 |          59
+ Mosi the Swift #31  | hippopotamus    | Crater Basin  |        1700 | 2026-10-20 22:09:55.448418+00 |          93
+ Duma of the Plains  | impala          | Acacia Pan    |        1600 | 2026-10-20 22:09:55.448418+00 |          91
+ Mosi the Swift #138 | hippopotamus    | Thornbush Pan |          90 | 2026-10-20 22:09:55.448418+00 |          27
+ Duma the Watchful   | blue_wildebeest | Baobab Dam    |         300 | 2026-10-20 22:09:55.448418+00 |          56
+ Duma of the Delta   | elephant        | Reed Lagoon   |         950 | 2026-10-20 22:09:54.442845+00 |          76
+ Asha of the Delta   | plains_zebra    | Acacia Pan    |        1600 | 2026-10-20 22:09:53.445394+00 |          84
 (10 rows)
 
 ```

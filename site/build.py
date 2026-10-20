@@ -19,7 +19,11 @@ OUT = HERE / "_site"
 sys.path.insert(0, str(HERE.parent / "pg"))
 from bench_readme import read_bench  # noqa: E402  (one parser for bench.txt)
 PLAYER_CSS = "https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.css"
+PLAYER_CSS_SRI = "sha384-VAIywtUJJ6n5TJ2byhF+zitDG0mvuNWwRS2gSv1QtEZiVw+c/T/gdOXGwyP2OeJK"
 PLAYER_JS = "https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.min.js"
+PLAYER_JS_SRI = "sha384-svQ3ol2I6XJvPsGztCmG9/XctZ37XNsP86aAFDcKciKlaGHNbEmhhedZ7tNu5b9h"
+# Recompute the hashes when bumping the version:
+#   curl -sL <url> | openssl dgst -sha384 -binary | base64
 CTA = ('Built by <a href="https://www.artie.com">Artie</a>. To replicate this database into a warehouse for real, '
        '<a href="https://app.artie.com">create a free pipeline</a>; the free plan has no end date.')
 SITE_TITLE = "artie.world"
@@ -87,8 +91,8 @@ def dataset_page(template, d):
             '<p>Each event file says what Postgres emits, what Artie documents, and what the destination should look like. '
             'What a native Postgres subscriber actually did, including the two events it broke on, is in '
             '<a href="https://github.com/artie-labs/terra/blob/master/docs/events-observed.md">docs/events-observed.md</a>.</p>')
-    head_extra = (f'<link rel="stylesheet" href="{PLAYER_CSS}">'
-                  f'<script src="{PLAYER_JS}"></script>'
+    head_extra = (f'<link rel="stylesheet" href="{PLAYER_CSS}" integrity="{PLAYER_CSS_SRI}" crossorigin="anonymous">'
+                  f'<script src="{PLAYER_JS}" integrity="{PLAYER_JS_SRI}" crossorigin="anonymous"></script>'
                   '<script>window.addEventListener("DOMContentLoaded", function () {'
                   f'  AsciinemaPlayer.create({json.dumps(d["recording"])}, document.getElementById("player"), '
                   '{cols: 100, rows: 28, idleTimeLimit: 2, poster: "npt:0:5", fit: "width", theme: "asciinema"});'

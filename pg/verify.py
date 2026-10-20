@@ -26,7 +26,11 @@ against a real destination yet; see pg/README.md "Verify".
   python3 verify.py --wait 120                        # retry for up to 120 s
   python3 verify.py --dest-type snowflake --dest "TERRA.PUBLIC" --wait 600
   python3 verify.py --dest-type bigquery  --dest "my-project.terra"
-  python3 verify.py --dest "$DEST_DSN" --dest-schema artie --allow-extra-columns --ignore-types   # Artie writing to Postgres
+  # Artie writing to Postgres, after event 05: Artie keeps "name" and only fills
+  # display_name for rows changed since the rename, so leave it out.
+  python3 verify.py --dest "$DEST_DSN" --dest-schema artie --allow-extra-columns --ignore-types \
+                    --exclude-columns animals.display_name
+  python3 verify.py --dest "$DEST_DSN" --dest-schema artie --allow-extra-columns --no-checksum   # names, counts, pk sums only
 
 Exit status is 0 when every table matches, 1 otherwise.
 """
@@ -40,8 +44,11 @@ import subprocess
 import sys
 import time
 
-DEFAULT_SOURCE = "postgresql://postgres:change-me-admin-password@localhost:5432/terra"
-DEFAULT_DEST = "postgresql://postgres:change-me-admin-password@localhost:5433/terra"
+# The same TERRA_ADMIN_PASSWORD that docker-compose.yml reads, so changing the
+# password in one place keeps every documented command working.
+ADMIN_PASSWORD = os.environ.get("TERRA_ADMIN_PASSWORD", "change-me-admin-password")
+DEFAULT_SOURCE = f"postgresql://postgres:{ADMIN_PASSWORD}@localhost:5432/terra"
+DEFAULT_DEST = f"postgresql://postgres:{ADMIN_PASSWORD}@localhost:5433/terra"
 SKIP_TABLES = {"test_heartbeat_table"}
 NULL_TOKEN = "<null>"
 IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -173,20 +180,22 @@ class BigQuerySide:
         return {"rows": int(count), "pk_sum": int(float(total)), "columns": {c: columns[c] for c in cols}}
 
 
-def compare_once(source, dest, dest_type, tables, allow_extra, ignore_types=False):
+def compare_once(source, dest, dest_type, tables, allow_extra, ignore_types=False, exclude=(), no_checksum=False):
     results = []
     for table in tables:
         src_cols = source.columns(table)
         pk = source.primary_key(table)
         problems = []
         dst = None
+        skipped = set()
         try:
             dst_cols = dest.columns(table)
             if not dst_cols:
                 problems.append("missing on destination")
                 shared = None
             else:
-                shared = [c for c in src_cols if c in dst_cols] or list(src_cols)
+                skipped = {col for tbl, col in exclude if tbl == table}
+                shared = [c for c in src_cols if c in dst_cols and c not in skipped] or list(src_cols)
                 dst = dest.summary(table, dst_cols, pk, shared) if dest_type == "postgres" else dest.summary(table, dst_cols, pk)
         except RuntimeError as error:
             problems.append(str(error).splitlines()[0][:120])
@@ -204,8 +213,14 @@ def compare_once(source, dest, dest_type, tables, allow_extra, ignore_types=Fals
                     c for c in src["columns"] if c in dst["columns"] and src["columns"][c] != dst["columns"][c]]
                 if mismatched:
                     problems.append("type differs: " + ", ".join(f"{c} {src['columns'][c]} vs {dst['columns'][c]}" for c in mismatched))
-                if src["checksum"] != dst["checksum"]:
+                if not no_checksum and src["checksum"] != dst["checksum"]:
                     problems.append("checksum differs")
+                if no_checksum and pk:
+                    sums = []
+                    for side in (source, dest):
+                        sums.append(int(psql_rows(side.dsn, f"SELECT coalesce(sum({quote(pk[0])}), 0) FROM {quote(side.schema)}.{quote(table)}")[0][0]))
+                    if sums[0] != sums[1]:
+                        problems.append("primary key sum differs")
             else:
                 src_pk_sum = None
                 if pk:
@@ -215,6 +230,8 @@ def compare_once(source, dest, dest_type, tables, allow_extra, ignore_types=Fals
             if src["rows"] != dst["rows"]:
                 problems.append(f"rows {src['rows']} vs {dst['rows']}")
         notes = []
+        if dst is not None and skipped:
+            notes.append("excluded from checksum: " + ", ".join(sorted(skipped)))
         if dst is not None and extra and allow_extra:
             problems = [p for p in problems if not p.startswith("destination has extra")]
             notes.append("extra on destination: " + ", ".join(extra))
@@ -246,6 +263,12 @@ def main():
                         help="report, but do not fail on, destination columns the source lacks; implied for snowflake and bigquery")
     parser.add_argument("--ignore-types", action="store_true",
                         help="compare column names, counts and checksums only; for Postgres tables Artie created with its own types")
+    parser.add_argument("--exclude-columns", default="",
+                        help="comma separated table.column pairs to leave out of the checksum, e.g. animals.display_name "
+                             "for a destination that only has display_name for rows changed after event 05")
+    parser.add_argument("--no-checksum", action="store_true",
+                        help="Postgres destinations: compare names, counts and the primary key sum only, as the Snowflake "
+                             "and BigQuery modes do; for destinations whose text forms differ from the source")
     parser.add_argument("--tables", help="comma separated subset; default is every base table in the source")
     parser.add_argument("--wait", type=float, default=0, help="seconds to keep retrying until everything matches")
     parser.add_argument("--interval", type=float, default=2)
@@ -270,7 +293,8 @@ def main():
             sys.exit("verify: invalid table name(s): " + ", ".join(bad))
         if not tables:
             sys.exit("verify: FAIL (the source has no base tables in schema public; check --source)")
-        results = compare_once(source, dest, args.dest_type, tables, allow_extra, args.ignore_types)
+        exclude = [tuple(pair.split(".", 1)) for pair in args.exclude_columns.split(",") if pair.strip()]
+        results = compare_once(source, dest, args.dest_type, tables, allow_extra, args.ignore_types, exclude, args.no_checksum)
         failed = [r for r in results if r["problems"]]
         if not failed or time.monotonic() >= deadline:
             break

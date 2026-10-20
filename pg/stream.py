@@ -33,7 +33,8 @@ import subprocess
 import sys
 import time
 
-DEFAULT_DSN = "postgresql://postgres:change-me-admin-password@localhost:5432/terra"
+# Same TERRA_ADMIN_PASSWORD that docker-compose.yml reads; TERRA_DSN overrides the whole DSN.
+DEFAULT_DSN = f"postgresql://postgres:{os.environ.get('TERRA_ADMIN_PASSWORD', 'change-me-admin-password')}@localhost:5432/terra"
 
 # Names, statuses and note templates come from the seed generator in this
 # directory, so the stream writes the same kind of rows the seed did. About

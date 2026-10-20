@@ -61,14 +61,15 @@ services:
       - ./subscriber/02_subscribe.sh:/docker-entrypoint-initdb.d/02_subscribe.sh:ro
       - terra_subdata:/var/lib/postgresql/data
     healthcheck:
-      # Healthy only once the subscription exists. If CREATE SUBSCRIPTION failed
-      # on first start (wrong artie password, source not ready) the container
-      # would otherwise come back up initialized and silently unsubscribed;
-      # this way `docker compose up --wait` reports it unhealthy instead.
-      test: ["CMD-SHELL", "psql -h 127.0.0.1 -U postgres -d terra -Atc \"SELECT 1 FROM pg_subscription WHERE subname = 'terra_sub'\" | grep -q 1"]
+      # Healthy only once the subscription exists AND every table has finished
+      # its initial copy (state 'r'). If CREATE SUBSCRIPTION failed on first
+      # start, or the copy fails because the source volume carries an older
+      # schema, `docker compose up --wait` reports the service unhealthy
+      # instead of leaving a replica that is up and empty.
+      test: ["CMD-SHELL", "psql -h 127.0.0.1 -U postgres -d terra -Atc \"SELECT count(*) > 0 AND bool_and(srsubstate = 'r') FROM pg_subscription_rel r JOIN pg_subscription s ON s.oid = r.srsubid WHERE s.subname = 'terra_sub'\" | grep -qx t"]
       interval: 2s
       timeout: 3s
-      retries: 150
+      retries: 900
 
 volumes:
   # Both volumes take the Compose project name as prefix, so `-p terra` gives

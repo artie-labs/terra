@@ -26,8 +26,9 @@ ALTER TABLE animals      ALTER COLUMN animal_id TYPE bigint;
 ALTER TABLE observations ALTER COLUMN animal_id TYPE bigint;
 COMMIT;
 
--- Re-runnable: picks name or display_name, and sends status only while the
--- column still exists, so the file works before and after events 05 and 08.
+-- Order-independent and re-runnable: uses name or display_name, and sends
+-- status and weight_kg only while those columns exist, so the file works on a
+-- fresh stack (before event 01) and after events 05 and 08.
 DO $$
 DECLARE
   name_col text := CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
@@ -35,12 +36,14 @@ DECLARE
                         THEN 'name' ELSE 'display_name' END;
   has_status boolean := EXISTS (SELECT 1 FROM information_schema.columns
                                 WHERE table_name = 'animals' AND column_name = 'status');
+  has_weight boolean := EXISTS (SELECT 1 FROM information_schema.columns
+                                WHERE table_name = 'animals' AND column_name = 'weight_kg');
 BEGIN
   EXECUTE format(
-    'INSERT INTO animals (animal_id, %I, species, home_watering_hole_id, weight_kg%s) '
-    'VALUES (%s, %L, %L, %s, %s%s) ON CONFLICT (animal_id) DO NOTHING',
-    name_col, CASE WHEN has_status THEN ', status' ELSE '' END,
-    3000000001, 'Mkubwa Sana', 'elephant', 2, 5100.00, CASE WHEN has_status THEN ', ' || quote_literal('adult') ELSE '' END);
+    'INSERT INTO animals (animal_id, %I, species, home_watering_hole_id%s%s) '
+    'VALUES (%s, %L, %L, %s%s%s) ON CONFLICT (animal_id) DO NOTHING',
+    name_col, CASE WHEN has_weight THEN ', weight_kg' ELSE '' END, CASE WHEN has_status THEN ', status' ELSE '' END,
+    3000000001, 'Mkubwa Sana', 'elephant', 2, CASE WHEN has_weight THEN ', 5100.00' ELSE '' END, CASE WHEN has_status THEN ', ' || quote_literal('adult') ELSE '' END);
 END $$;
 
 INSERT INTO observations (observation_id, animal_id, watering_hole_id, observed_at, notes)

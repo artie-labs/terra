@@ -24,7 +24,7 @@ Run the second command in its own terminal; it writes about ten rows a second un
 
 If `docker compose up --wait` reports the subscriber unhealthy, its `CREATE SUBSCRIPTION` failed on first start, usually because the `artie` password in `init/03_artie.sql` and `TERRA_ARTIE_PASSWORD` differ; check `docker compose -p terra logs subscriber`, fix, then `docker compose -p terra down -v` and start again.
 
-Ports: the source is on `localhost:5432` (all interfaces, since Artie has to reach it), the subscriber on `127.0.0.1:5433` only. Both use the `postgres` password in `docker-compose.yml`. Reset everything with `docker compose -p terra down -v`. The event files can be re-run; each one checks the current schema before it changes it.
+Ports: the source is on `localhost:5432` (all interfaces, since Artie has to reach it), the subscriber on `127.0.0.1:5433` only. Both use the `postgres` password from `TERRA_ADMIN_PASSWORD`, default `change-me-admin-password`. `docker compose up --wait` returns only after the subscriber has finished copying every table. Reset everything with `docker compose -p terra down -v`. The event files can be re-run; each one checks the current schema before it changes it.
 
 ## What you will see
 
@@ -50,8 +50,8 @@ By the end, enter these values in Artie:
 
 Change the placeholder passwords first (see [SECURITY.md](../SECURITY.md)):
 
-- `docker-compose.yml`: `POSTGRES_PASSWORD`, or set `TERRA_ADMIN_PASSWORD` in the environment
-- `init/03_artie.sql`: the `artie` role password, and set `TERRA_ARTIE_PASSWORD` to the same value so the subscriber can connect
+- Set `TERRA_ADMIN_PASSWORD` in the environment. `docker-compose.yml` and every script in this directory read it, so the commands in this README keep working.
+- Edit the `artie` role password in `init/03_artie.sql` and set `TERRA_ARTIE_PASSWORD` to the same value so the subscriber can connect.
 
 ### Expose the database
 
@@ -92,7 +92,7 @@ For a Postgres destination it compares, per table: column names and full types (
 
 For Snowflake and BigQuery it compares column names, row count and the sum of the primary key, through the `snowsql` and `bq` CLIs. Those two modes were written against the docs and have not been run against a real destination. Doing that is item 1 of the hand-off checklist in the v0.1 pull request.
 
-Extra columns on the destination are reported but do not fail the check for Snowflake and BigQuery, or for Postgres with `--allow-extra-columns`. `--ignore-types` skips the type comparison, which is needed for Postgres tables Artie created with its own type choices. Artie's docs say a dropped or renamed source column stays in the destination unless hard deletes for columns are on (`artie-schema-evolution` in sources.md), so after events 05 and 08 a destination is expected to still have `name` and `status`.
+Extra columns on the destination are reported but do not fail the check for Snowflake and BigQuery, or for Postgres with `--allow-extra-columns`. `--ignore-types` skips the type comparison, which is needed for Postgres tables Artie created with its own type choices. After event 05 an Artie destination keeps `name` and only has `display_name` for rows changed since the rename, so add `--exclude-columns animals.display_name`; `--no-checksum` falls back to names, counts and primary key sums, as the Snowflake and BigQuery modes do. Artie's docs say a dropped or renamed source column stays in the destination unless hard deletes for columns are on (`artie-schema-evolution` in sources.md), so after events 05 and 08 a destination is expected to still have `name` and `status`.
 
 Exit status is 0 on a full match, 1 otherwise, which is what CI keys on.
 

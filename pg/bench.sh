@@ -27,8 +27,11 @@ while [ $# -gt 0 ]; do
     *) echo "usage: bench.sh [--runs N] [--cold]" >&2; exit 2 ;;
   esac
 done
-SOURCE_DSN="${SOURCE_DSN:-postgresql://postgres:change-me-admin-password@localhost:5432/terra}"
-SUB_DSN="${SUB_DSN:-postgresql://postgres:change-me-admin-password@localhost:5433/terra}"
+# Same TERRA_ADMIN_PASSWORD that docker-compose.yml reads; SOURCE_DSN and
+# SUB_DSN override the whole DSN.
+admin_pw="${TERRA_ADMIN_PASSWORD:-change-me-admin-password}"
+SOURCE_DSN="${SOURCE_DSN:-postgresql://postgres:${admin_pw}@localhost:5432/terra}"
+SUB_DSN="${SUB_DSN:-postgresql://postgres:${admin_pw}@localhost:5433/terra}"
 # Honours Docker's own variable, so COMPOSE_PROJECT_NAME=terra-ci bench.sh
 # keeps its volumes apart from a local `-p terra` stack.
 project="${COMPOSE_PROJECT_NAME:-terra}"

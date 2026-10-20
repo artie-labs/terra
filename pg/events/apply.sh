@@ -7,8 +7,9 @@
 #   events/apply.sh all          # 01 through 08 in order
 #
 # Environment:
-#   SOURCE_DSN  publisher (default postgresql://postgres:change-me-admin-password@localhost:5432/terra)
-#   SUB_DSN     subscriber (default postgresql://postgres:change-me-admin-password@localhost:5433/terra)
+#   TERRA_ADMIN_PASSWORD  the postgres password, same variable docker-compose.yml reads
+#   SOURCE_DSN  publisher (default postgresql://postgres:$TERRA_ADMIN_PASSWORD@localhost:5432/terra)
+#   SUB_DSN     subscriber (default postgresql://postgres:$TERRA_ADMIN_PASSWORD@localhost:5433/terra)
 #               Set SUB_DSN=none when the consumer is something else, for
 #               example an Artie pipeline. If SUB_DSN is set to anything else
 #               and the subscriber cannot be reached, this script stops.
@@ -25,8 +26,11 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE_DSN="${SOURCE_DSN:-postgresql://postgres:change-me-admin-password@localhost:5432/terra}"
-SUB_DSN="${SUB_DSN:-postgresql://postgres:change-me-admin-password@localhost:5433/terra}"
+# Same TERRA_ADMIN_PASSWORD that docker-compose.yml reads; SOURCE_DSN and
+# SUB_DSN override the whole DSN.
+admin_pw="${TERRA_ADMIN_PASSWORD:-change-me-admin-password}"
+SOURCE_DSN="${SOURCE_DSN:-postgresql://postgres:${admin_pw}@localhost:5432/terra}"
+SUB_DSN="${SUB_DSN:-postgresql://postgres:${admin_pw}@localhost:5433/terra}"
 CATCHUP_TIMEOUT="${CATCHUP_TIMEOUT:-180}"
 
 if [ "$#" -eq 0 ]; then
@@ -82,9 +86,9 @@ fi
 for n in "$@"; do
   case "$n" in *[!0-9]*|"") echo "event numbers must be integers 1 to 8, got '$n'" >&2; exit 2 ;; esac
   nn=$(printf "%02d" "$n")
-  src=$(ls "$here"/"${nn}"_*.sql 2>/dev/null | head -1)
-  [ -n "$src" ] || { echo "no event ${nn}" >&2; exit 1; }
-  sub=$(ls "$here"/subscriber/"${nn}"_*.sql 2>/dev/null | head -1)
+  src=$( (ls "$here"/"${nn}"_*.sql 2>/dev/null || true) | head -1)
+  [ -n "$src" ] || { echo "no event ${nn}: files are $(ls "$here"/*.sql | xargs -n1 basename | tr '\n' ' ')" >&2; exit 1; }
+  sub=$( (ls "$here"/subscriber/"${nn}"_*.sql 2>/dev/null || true) | head -1)
   echo "### event ${nn}: $(sed -n '1s/^-- //p' "$src")"
   [ "$have_sub" = 1 ] && [ -n "$sub" ] && run_section "$SUB_DSN" "$sub" before-publisher
   echo "== source: $(basename "$src")"

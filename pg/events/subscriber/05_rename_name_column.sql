@@ -12,14 +12,16 @@ BEGIN
   END IF;
 END $$;
 -- after-catchup
--- Contract: only post-rename rows can arrive from here on. Copy the old
--- values across, then drop the old column.
+-- Contract: only post-rename rows can arrive from here on. Take the table
+-- lock first so the UPDATE and the DROP cannot deadlock against the apply
+-- worker's row locks, then copy the old values across and drop the column.
 DO $$
 BEGIN
+  LOCK TABLE animals IN ACCESS EXCLUSIVE MODE;
   IF EXISTS (SELECT 1 FROM information_schema.columns
              WHERE table_schema = 'public' AND table_name = 'animals' AND column_name = 'name') THEN
     UPDATE animals SET display_name = name WHERE display_name IS NULL;
     ALTER TABLE animals DROP COLUMN name;
   END IF;
+  ALTER TABLE animals ALTER COLUMN display_name SET NOT NULL;
 END $$;
-ALTER TABLE animals ALTER COLUMN display_name SET NOT NULL;
