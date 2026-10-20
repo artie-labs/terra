@@ -1,4 +1,4 @@
--- 01_schema.sql — initial (pre-migration) schema for the Terra CDC demo.
+-- 01_schema.sql: initial (pre-migration) schema for the Terra CDC demo.
 -- Every table has a primary key so UPDATEs and DELETEs retain row identity over
 -- logical replication (default replica identity = primary key).
 

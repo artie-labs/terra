@@ -1,4 +1,4 @@
--- 03_artie.sql — service account + publication for Artie.
+-- 03_artie.sql: service account + publication for Artie.
 -- Runs last (after schema in 01 and data in 02_seed.sql).
 --
 -- CHANGE THE PASSWORD BELOW before you expose this to the internet.
