@@ -6,20 +6,20 @@ services:
     environment:
       # Admin/superuser password. Used only for you to administer the DB.
       # This is NOT the account Artie uses (that's the 'artie' role in 03_artie.sql).
-      POSTGRES_PASSWORD: change-me-admin-password
+      POSTGRES_PASSWORD: ${TERRA_ADMIN_PASSWORD:-change-me-admin-password}
       POSTGRES_DB: terra
     command:
       - "postgres"
       - "-c"
-      - "wal_level=logical"          # required for CDC — the #1 thing people forget
+      - "wal_level=logical"          # required for CDC; the #1 thing people forget
       - "-c"
       - "max_wal_senders=10"
       - "-c"
       - "max_replication_slots=10"
       - "-c"
-      - "idle_in_transaction_session_timeout=86400000"  # 24h; matches Artie's guidance
+      - "idle_in_transaction_session_timeout=86400000"  # 24h; Artie's docs suggest setting this
     ports:
-      - "5432:5432"                  # host:container — Artie connects to the host's 5432
+      - "5432:5432"                  # host:container; Artie connects to the host's 5432
     volumes:
       # Scripts here run ONCE, in filename order, the first time the volume is empty:
       #   01_schema.sql  -> tables + enum
@@ -27,9 +27,45 @@ services:
       #   03_artie.sql   -> artie role, grants, publication
       - ./init:/docker-entrypoint-initdb.d:ro
       - terra_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # TCP on purpose: the init-phase server only listens on a unix socket, so
+      # this stays unhealthy until the seed has finished loading.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d terra"]
+      interval: 2s
+      timeout: 3s
+      retries: 150
+
+  # A stand-in for the replication consumer: a second Postgres that subscribes to
+  # dbz_publication with native logical replication. It lets the whole demo run
+  # with no account anywhere. It is NOT a CDC pipeline: DDL is not replicated, so
+  # events/subscriber/ carries the matching DDL for it. See pg/README.md.
+  subscriber:
+    image: postgres:16
+    container_name: terra-subscriber
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_PASSWORD: ${TERRA_ADMIN_PASSWORD:-change-me-admin-password}
+      POSTGRES_DB: terra
+      # Must match the artie role password in init/03_artie.sql.
+      TERRA_ARTIE_PASSWORD: ${TERRA_ARTIE_PASSWORD:-change-me-to-a-long-random-string}
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./init/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./subscriber/02_subscribe.sh:/docker-entrypoint-initdb.d/02_subscribe.sh:ro
+      - terra_subdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d terra"]
+      interval: 2s
+      timeout: 3s
+      retries: 150
 
 volumes:
   terra_pgdata:
     # Keep the root-layout volume name so existing local Terra data is reused
     # after the source directories are reorganized.
     name: terra_terra_pgdata
+  terra_subdata:
