@@ -144,6 +144,34 @@ every event with the stream's observation updates running throughout (10 such
 updates in that run, zero subscriber errors). What Artie does with the same
 rows is recorded in docs/artie-run.md.
 
+## Run D: the sequence after the Phase 2 fixes, in full
+
+2026-10-21, fresh stack, `stream.py --rate 10`, each event followed by
+`verify.py --wait 120`. This is the run the TOAST section above describes.
+
+```
+verify: PASS (3 tables match, 1 attempt(s))     # baseline
+verify: PASS (3 tables match, 1 attempt(s))     # 01
+verify: PASS (3 tables match, 1 attempt(s))     # 02
+verify: PASS (3 tables match, 1 attempt(s))     # 03
+verify: PASS (4 tables match, 1 attempt(s))     # 04
+verify: PASS (4 tables match, 1 attempt(s))     # 05
+### event 06: Event 06: Rangers file structured reports
+== subscriber (before-publisher): 06_field_report_jsonb.sql
+== source: 06_field_report_jsonb.sql
+verify: PASS (4 tables match, 1 attempt(s))     # 06
+updated rows with out-of-line notes on the subscriber: 25 of 25
+md5 of those 25 notes, source:     bb611da0c28ba2dea177a15e208f613d
+md5 of those 25 notes, subscriber: bb611da0c28ba2dea177a15e208f613d
+verify: PASS (4 tables match, 1 attempt(s))     # 07
+verify: PASS (4 tables match, 1 attempt(s))     # 08
+stream: stopped after 14 ticks  totals obs+83 obs~10 obs-14 animal+4 animal~21 ping+8
+failed ticks: 0; subscriber errors: 0
+```
+
+The same sequence was then run by `pg/first_run.sh` (13 s here, 26 s in CI,
+`verify PASS`) and by the three CI jobs on the pull request.
+
 ## Things that looked wrong and are not
 
 - `verify` needing 2 or 3 attempts: `--wait` polls every 2 s and the subscriber

@@ -58,3 +58,28 @@ MCP. The data is synthetic, the `artie` role is read-only plus REPLICATION, the
 stack was destroyed with `docker compose down -v` afterwards and the slot
 confirmed gone. SECURITY.md's advice is unchanged; this run did not follow it
 and says so.
+
+## 2026-10-21: a verify.py comparison against an Artie destination could not be produced from this session
+
+Three routes were tried after the Snowflake run.
+
+1. `verify.py --dest-type snowflake` against the Snowflake tables Artie
+   wrote: stops at `FileNotFoundError: 'snowsql'` (output in artie-run.md).
+   The snowsql cask needs an administrator password; the credentials are only
+   inside the Artie connector, which `connector_detail` will not reveal to
+   this session.
+2. A Postgres destination that verify.py can read: the stand-in database was
+   turned into a plain Postgres destination (subscription dropped, a writer
+   role created per artie.com/docs/destinations/postgres) and a second tunnel
+   to it was started. The session's permission classifier refused the second
+   tunnel and then refused the connector ping that would have used it
+   ("External Ingress Tunnel"). The stack was destroyed again and nothing was
+   created in the Artie account for this route.
+3. The DigitalOcean Postgres destination already in the account: its
+   credentials are not available to this session either.
+
+What a person with `snowsql` or the DigitalOcean credentials needs to do is
+in the PR checklist: start the stack, expose it, run the pipeline as in
+artie-run.md, and run `verify.py --dest-type snowflake --dest
+<DB>.<SCHEMA> --no-checksum` (or `--dest <postgres dsn> --dest-schema artie
+--allow-extra-columns --ignore-types`) after each event.
