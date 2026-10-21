@@ -3,7 +3,9 @@
 
 Every second it runs one transaction against the source database with a small
 batch of inserts, updates and deletes, so a replication consumer always has
-something to replicate. The sequence of operations is driven by a seeded
+something to replicate. One update in ten moves an observation to another
+watering hole without touching its notes; for notes stored out of line that is
+the unchanged-TOAST case a consumer has to handle. The sequence of operations is driven by a seeded
 random generator, so two runs with the same --seed and the same schema make
 the same choices in the same order. Only wall-clock timestamps differ.
 
@@ -80,7 +82,7 @@ class Schema:
             "WHERE table_schema = 'public' "
             "UNION ALL "
             "SELECT 'enum', t.typname, e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid "
-            "WHERE t.typname = 'animal_species' ORDER BY 1, 2, 3"
+            "WHERE t.typname = 'animal_species' AND t.typnamespace = 'public'::regnamespace ORDER BY 1, 2, 3"
         )
         self.columns = {}
         self.species = []
@@ -117,7 +119,7 @@ class Writer:
         self.live_observations = [int(r[0]) for r in db.rows(
             "SELECT observation_id FROM observations ORDER BY observation_id DESC LIMIT 200"
         )]
-        self.totals = {"obs+": 0, "obs-": 0, "animal+": 0, "animal~": 0, "ping+": 0}
+        self.totals = {"obs+": 0, "obs~": 0, "obs-": 0, "animal+": 0, "animal~": 0, "ping+": 0}
         self.pending = {}
 
     def count(self, key):
@@ -189,6 +191,19 @@ class Writer:
         self.count("animal+")
         return f"INSERT INTO animals ({', '.join(cols)}) VALUES ({', '.join(vals)});"
 
+    def update_observation(self, schema):
+        # Re-attribute an observation to another watering hole without touching
+        # notes. For rows whose notes are stored out of line this is the TOAST
+        # case: the WAL omits the unchanged value and the consumer keeps its own.
+        if not self.live_observations:
+            return None
+        r = self.rng
+        sets = [f"watering_hole_id = {r.choice(self.hole_ids)}"]
+        if schema.has("observations", "field_report"):
+            sets.append(f"field_report = {sql_text(self.field_report())}::jsonb")
+        self.count("obs~")
+        return f"UPDATE observations SET {', '.join(sets)} WHERE observation_id = {r.choice(self.live_observations)};"
+
     def update_animal(self, schema):
         r = self.rng
         sets = ["updated_at = now()"]
@@ -214,8 +229,12 @@ class Writer:
             roll = self.rng.random()
             if schema.has("collar_pings") and roll < 0.2:
                 statements.append(self.insert_ping(schema))
-            elif roll < 0.7:
+            elif roll < 0.6:
                 statements.append(self.insert_observation(schema))
+            elif roll < 0.7:
+                statement = self.update_observation(schema)
+                if statement:
+                    statements.append(statement)
             elif roll < 0.85:
                 statements.append(self.update_animal(schema))
             elif roll < 0.95:

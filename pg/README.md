@@ -2,7 +2,7 @@
 
 A synthetic African-safari database (watering holes, animals, observations) in Postgres 16 with logical replication on, a writer that never stops, and eight schema changes you apply one at a time. A second Postgres subscribes to it so you can watch what replication does with each change before you point a real pipeline at it.
 
-<!-- bench:start -->Measured end to end, from `docker compose up` on fresh volumes to `verify.py` passing against the subscriber: 29 s, so budget 1 minute (median of the runs recorded in [bench.txt](bench.txt)).<!-- bench:end -->
+<!-- bench:start -->Measured end to end, from `docker compose up` on fresh volumes to `verify.py` passing against the subscriber: 163 s, so budget 3 minutes (median of the runs recorded in [bench.txt](bench.txt)).<!-- bench:end -->
 
 ## Run it
 
@@ -28,14 +28,34 @@ Ports: the source is on `localhost:5432` (all interfaces, since Artie has to rea
 
 ## What you will see
 
-Full detail with log lines is in [docs/events-observed.md](../docs/events-observed.md). The short version, from running the sequence on 2026-10-20:
+Two consumers have run the full sequence: the Postgres subscriber that ships
+in `docker-compose.yml` (every run, in CI) and real Artie pipelines, on
+2026-10-21, once to Snowflake and once to a Postgres destination with
+`verify.py` after every event (docs/artie-run.md). The table says what each
+did. Nothing in the right column is a general claim about Artie; it is what
+those runs showed, and docs/artie-run.md has the timestamps.
 
-- `verify.py` prints one line per table: source rows, subscriber rows, column count, and `ok` or what differs. It passes after every event when `apply.sh` is allowed to touch the subscriber, and the subscriber logs no errors.
-- The subscriber needs DDL typed in by hand for every event. That is what `events/subscriber/` is. Logical replication copies rows, not schema; a replica cannot infer a new column from the rows that carry it. This is the gap a CDC tool fills, and it is why the subscriber is a stand-in, not a substitute, for a pipeline.
-- Events 05 (rename) and 08 (drop) are done in two steps on the subscriber: first make it accept both the old and the new row shape, then, after `apply.sh` has confirmed the subscriber applied everything that committed before the event, drop the old column. If you rename on both sides at the same moment while rows are in flight, replication stops for good with `missing replicated column: "name"`; docs/events-observed.md shows that happening and why.
-- If you run `SUB_DSN=none events/apply.sh all`, so the subscriber gets no DDL, replication stops at event 01 and never recovers on its own. The worker fails on the same transaction every 5 seconds, nothing later is applied for any table, and the slot keeps WAL on the source until you fix the subscriber or drop the slot.
-- `stream.py` may print one failed tick during event 08. It reads the schema at the start of each tick and the column drop landed inside one. The batch was never committed; it resyncs and continues.
+| | subscriber stand-in (docs/events-observed.md) | Artie, two runs (docs/artie-run.md) |
+| --- | --- | --- |
+| `verify.py` | passes after every event, zero subscriber errors, full checksum | Snowflake: columns and counts through the MCP only (no `snowsql` here). Postgres destination: full checksum PASS after the backfill and after events 01, 02, 05, 06, 07, 08; 03 and 04 needed operator action first |
+| 01 add column | column added on the subscriber first; next row fits | `WEIGHT_KG NUMBER(6,2)` appeared on the next flush |
+| 02 enum value | label added on the subscriber first | `SPECIES` is VARCHAR, nothing to do |
+| 03 int to bigint | widened on the subscriber first | Snowflake: already `NUMBER(38,0)`. Postgres: the column stays `integer` and every flush fails on the first id above 2^31; widening it by hand, pausing, redeploying and reconnecting did not clear it, a drop-and-backfill did until the next wide id, and a pipeline created after the event ran clean |
+| 04 new table | `CREATE TABLE` then `REFRESH PUBLICATION`, which copies existing rows | auto-replicate off: not picked up; added by hand and backfilled; rows written between the backfill snapshot and the end of the deploy were not forwarded (107 of 1420). Auto-replicate on: picked up 4.5 minutes later, 85 of 85 rows matched |
+| 05 rename | both columns during catch-up, then `name` dropped by `apply.sh`; renaming both sides at once stalls replication for good | both `NAME` and `DISPLAY_NAME` stay; `NAME` is frozen |
+| 06 jsonb column and the TOAST case | column added first; the 25 out-of-line `notes` arrived byte-identical | `FIELD_REPORT VARIANT` on Snowflake; on Postgres all 249 out-of-line `notes` byte-identical after the UPDATE, checksum PASS 19 s after the writer stopped |
+| 07 NOT NULL DEFAULT column | column added first | `ELEVATION_M NUMBER(38,0)` on Snowflake, `elevation_m integer` on Postgres; nullable, no default, both times |
+| 08 drop column | `status` made nullable first, dropped after catch-up | `STATUS` stays, frozen |
+| lag | 1 to 3 s | 30 s flush interval, 0.6 to 3.5 s reported latency on Snowflake; on Postgres with a 20 s flush, a checksum match 19 to 51 s after the writer stopped, and 6 to 10 minutes before a freshly deployed transfer's first flush |
+| what it needs from you | the DDL in `events/subscriber/`, applied by `apply.sh` | nothing for columns; a table added to the pipeline before writing to it, or auto-replicate; on a Postgres destination, a re-backfill or a new pipeline after an int to bigint change |
+
+Things that look wrong and are not, on the subscriber side:
+
 - `verify.py` usually needs two or three attempts right after an event. The subscriber runs a second or two behind the writer.
+- `stream.py` may print one failed tick during event 08. It reads the schema at the start of each tick and the column drop landed inside one. The batch was never committed; it resyncs and continues.
+- If you run `SUB_DSN=none events/apply.sh all` with the subscriber attached, so it gets no DDL, replication stops at event 01 and never recovers on its own. The worker fails on the same transaction every 5 seconds, nothing later is applied for any table, and the slot keeps WAL on the source until you fix the subscriber or drop the slot. Detach the subscriber first (`docker compose rm -sf subscriber`, then drop its slot) when something else is the consumer.
+
+Event 06 is also the TOAST case. Its UPDATE sets `field_report` on 25 rows whose `notes` are stored out of line and leaves `notes` alone, so the WAL carries no `notes` value for them (`notes[text]:unchanged-toast-datum` in a `test_decoding` peek); the consumer has to keep what it has. `stream.py` does the same about once a second by moving an observation to another watering hole. `verify.py` checksums `notes`, so a consumer that dropped or nulled them fails.
 
 ## Connect Artie
 
@@ -67,7 +87,7 @@ For a steadier demo, run this directory on a small VM and allow inbound `5432` o
 
 ### Create the source
 
-Create a PostgreSQL source using the host, port, `artie` credentials, and database `terra`. Set the publication to `dbz_publication`. Artie creates its own replication slot. The publication is `FOR ALL TABLES`, which is what Artie's Postgres page asks for (`artie-postgres` in sources.md).
+Create a PostgreSQL source using the host, port, `artie` credentials, and database `terra`. Set the publication to `dbz_publication`. Artie creates its own replication slot. The publication is `FOR ALL TABLES`, which is what Artie's Postgres page asks for (`artie-postgres` in sources.md). Two things the 2026-10-21 run hit on the first deploy (docs/artie-run.md): the source reader's "publish partitioned table changes via partition root" setting defaults to on and must be turned off to match this publication, and a Postgres or Snowflake destination schema that does not exist yet is created only if "dynamically create namespaces" is on.
 
 Once validated, Artie backfills `watering_holes`, `animals`, and `observations`, then streams changes. Run `stream.py` and the events exactly as above; `verify.py` has a `--dest-type snowflake` and `--dest-type bigquery` mode for the destination, see "Verify".
 
@@ -107,7 +127,7 @@ Each file in `events/` has a header saying what Postgres emits for it, what Arti
 | 03 | The herd outgrows int | `ALTER COLUMN animal_id TYPE bigint` on `animals` and `observations` | widen first |
 | 04 | The collars come online | `CREATE TABLE collar_pings (...)` | create the table first, `REFRESH PUBLICATION` after |
 | 05 | The naming committee | `ALTER TABLE animals RENAME COLUMN name TO display_name` | add `display_name` and make `name` nullable first; after catch-up copy and drop `name` |
-| 06 | Rangers file structured reports | `ALTER TABLE observations ADD COLUMN field_report jsonb` | add the column first |
+| 06 | Rangers file structured reports | `ALTER TABLE observations ADD COLUMN field_report jsonb`, then update 25 out-of-line rows without touching `notes` | add the column first |
 | 07 | Survey adds elevation | `ALTER TABLE watering_holes ADD COLUMN elevation_m int NOT NULL DEFAULT 0` | add the column first |
 | 08 | Status moves to the collars | `ALTER TABLE animals DROP COLUMN status` | make `status` nullable first; drop it after catch-up |
 
@@ -165,6 +185,10 @@ pg/
 ├── bench_readme.py         # keeps the number at the top of this file honest
 └── schema_svg.py           # draws the schema from information_schema
 ```
+
+## The stranger test
+
+`first_run.sh` runs the three commands above exactly as written, times them, and prints one line such as `first run: 41 seconds, verify PASS`. CI runs it as its own job, so the README path is tested by something that has never seen the repo before.
 
 ## Scope
 

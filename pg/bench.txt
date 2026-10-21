@@ -1,10 +1,12 @@
 # pg/bench.txt is written by pg/bench.sh; do not edit by hand.
-# median of 3 run(s) on 2026-10-20T16:29:02Z, Darwin arm64, docker 29.5.2, image pulled
-# run: 11 3 3 0 17
-# run: 23 3 4 0 30
-# run: 23 3 3 0 29
-image_pull 23
+# median of 3 run(s) on 2026-10-21T04:47:57Z, Darwin arm64, docker 29.5.2, image pulled; network pull was 120 to 159 s this time
+# earlier measurement, same machine, 2026-10-20T16:29:02Z, image pulled in 11 to 23 s: total 29 (runs: 11 3 3 0 17, 23 3 4 0 30, 23 3 3 0 29)
+# cached image, same machine, 2026-10-21: total 9 (seed 3, subscriber 3, verify 0 to 1)
+# run: 156 3 3 1 163
+# run: 159 2 4 0 165
+# run: 120 3 3 1 127
+image_pull 156
 seed_loaded 3
 subscriber_synced 3
-verify_pass 0
-total 29
+verify_pass 1
+total 163
