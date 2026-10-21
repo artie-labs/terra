@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: If you use this dataset or the demo, please cite it as below.
+title: "Terra: live CDC source datasets"
+version: 0.1.0
+date-released: 2026-10-20
+license: Apache-2.0
+repository-code: https://github.com/artie-labs/terra
+url: https://artie.world
+authors:
+  - name: Artie Technologies, Inc.
+    website: https://www.artie.com
+keywords:
+  - change data capture
+  - logical replication
+  - postgres
+  - schema evolution
+  - sample dataset
+abstract: >-
+  A synthetic safari database in Postgres 16 with logical replication, a
+  continuous deterministic writer, eight numbered schema-evolution events, a
+  Postgres subscriber as an offline replication consumer, and a verifier that
+  compares source and destination after each event.

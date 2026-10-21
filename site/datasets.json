@@ -1,0 +1,36 @@
+[
+  {
+    "slug": "pg-safari",
+    "name": "Safari",
+    "animal": "African safari animals",
+    "source_db": "PostgreSQL 16, logical replication",
+    "capability": "Schema evolution under a live write stream",
+    "hook": "A watering-hole database that never stops changing, eight schema changes you apply on purpose, and a verifier that tells you whether your replica kept up.",
+    "status": "v0.1, runnable offline, not yet verified against a hosted destination",
+    "repo_url": "https://github.com/artie-labs/terra/tree/master/pg",
+    "bench_file": "../pg/bench.txt",
+    "recording": "recordings/pg-safari.cast",
+    "recording_note": "compose up, the stream, the eight events, verify passing after each, then the three queries on the replica. Real output, not mocked.",
+    "schema_image": "schema.svg",
+    "schema_note": "Generated from information_schema at the end of the sequence by pg/schema_svg.py.",
+    "run_note": "The third command keeps writing until you stop it; run it in its own terminal. The fourth applies the eight events, waiting for the replica to catch up where an event needs it, then checks the replica. To check after each event, run events/apply.sh N and python3 verify.py --wait 120 for N from 1 to 8.",
+    "events_note": "Each event file says what Postgres emits, what Artie documents, and what the destination should look like. What a native Postgres subscriber actually did, including the run where it was given no DDL and stalled, is in",
+    "observed_url": "https://github.com/artie-labs/terra/blob/master/docs/events-observed.md",
+    "run": [
+      "git clone https://github.com/artie-labs/terra && cd terra/pg",
+      "docker compose -p terra up -d --wait",
+      "python3 stream.py",
+      "events/apply.sh all && python3 verify.py --wait 120"
+    ],
+    "events": [
+      {"n": 1, "title": "Weigh-in", "ddl": "ALTER TABLE animals ADD COLUMN weight_kg numeric(6,2)", "tests": "column appears on the replica after the next row change; verify passes"},
+      {"n": 2, "title": "A pangolin is sighted", "ddl": "ALTER TYPE animal_species ADD VALUE 'pangolin'", "tests": "a row with the new label replicates once the replica's enum has it"},
+      {"n": 3, "title": "The herd outgrows int", "ddl": "ALTER TABLE animals ALTER COLUMN animal_id TYPE bigint (and observations)", "tests": "animal 3000000001 lands; column types match on both sides"},
+      {"n": 4, "title": "The collars come online", "ddl": "CREATE TABLE collar_pings (...)", "tests": "replica needs the table created and the subscription refreshed; the refresh copies the existing rows"},
+      {"n": 5, "title": "The naming committee", "ddl": "ALTER TABLE animals RENAME COLUMN name TO display_name", "tests": "rows before and after the rename carry different column names; the replica must accept both until it has caught up, or it stops for good"},
+      {"n": 6, "title": "Rangers file structured reports", "ddl": "ALTER TABLE observations ADD COLUMN field_report jsonb", "tests": "JSON round-trips; the field-report query returns rows"},
+      {"n": 7, "title": "Survey adds elevation", "ddl": "ALTER TABLE watering_holes ADD COLUMN elevation_m int NOT NULL DEFAULT 0", "tests": "only the 12 updated rows cross the wire; the backfill of defaults does not"},
+      {"n": 8, "title": "Status moves to the collars", "ddl": "ALTER TABLE animals DROP COLUMN status", "tests": "writer stops sending status; replica must relax the NOT NULL first and drop the column only after catching up"}
+    ]
+  }
+]
