@@ -28,7 +28,7 @@ subscriber has caught up (see "Why the subscriber migrates in two steps").
 | 03 | The herd outgrows int | before: widen both columns | No errors. Both tables were widened on the subscriber first; animal 3000000001 and observation 9000000001 arrived as text and fit. The rewrite on the publisher produced no replicated changes. | PASS |
 | 04 | The collars come online | before: create table; after: `REFRESH PUBLICATION` | No errors. With the table already present but not yet subscribed, the apply worker skipped its rows instead of failing; the refresh then started a synchronization worker that copied the existing rows and caught up. In an earlier version that created the table only after the publisher, the worker failed twice with `relation "public.collar_pings" does not exist` and recovered 5 s later. | PASS |
 | 05 | The naming committee | before: add `display_name`, make `name` nullable; after catch-up: copy values, drop `name` | No errors. Rows written before the rename (carrying `name`) and after it (carrying `display_name`) both fit while the two columns coexisted. After catch-up the subscriber copied `name` into `display_name` for the untouched rows and dropped `name`. | PASS |
-| 06 | Rangers file structured reports | before: add column | No errors. The jsonb text form converted back to jsonb on the subscriber; the checksum, which compares `jsonb::text`, matched. | PASS |
+| 06 | Rangers file structured reports | before: add column | No errors. The jsonb text form converted back to jsonb on the subscriber; the checksum, which compares `jsonb::text`, matched. The event's UPDATE touched 25 rows whose `notes` are out of line without touching `notes`; all 25 arrived with `field_report` set and `notes` byte-identical to the source (md5 of the 25 notes equal on both sides, see "The TOAST case" below). | PASS |
 | 07 | Survey adds elevation | before: add column with default | No errors. Only the 12 UPDATEd rows were sent; the backfill of 0s was a catalog change on both sides and nothing crossed the wire for it. | PASS |
 | 08 | Status moves to the collars | before: make `status` nullable; after catch-up: drop it | No errors. Rows written after the drop omit `status` and land with NULL; after catch-up the column is dropped. One `stream.py` batch can fail on the publisher (`column "status" of relation "animals" does not exist`) when the drop lands inside a tick; it resyncs and continues. | PASS |
 
@@ -117,6 +117,32 @@ which "will stop the replication; it must be resolved manually by the user"
 (docs/sources.md: pg-lr-conflicts). The fix is either the matching DDL
 (`events/subscriber/01_add_weight_column.sql`) or skipping the transaction
 with `ALTER SUBSCRIPTION ... SKIP`, which loses the rows in it.
+
+## The TOAST case, proved
+
+Re-run on 2026-10-21 with the explicit step in event 06 (`UPDATE ... SET
+field_report = ... WHERE octet_length(notes) > 2000 ... LIMIT 25`) and
+`stream.py` moving about one observation a second to another watering hole
+without touching `notes`.
+
+What the WAL carries for such an UPDATE, read with a temporary
+`test_decoding` slot on the source (`pg_logical_slot_peek_changes`):
+
+```
+table public.observations: UPDATE: observation_id[bigint]:4 animal_id[bigint]:100
+  watering_hole_id[integer]:3 observed_at[timestamp with time zone]:'2022-06-20 20:35:00+00'
+  notes[text]:unchanged-toast-datum field_report[jsonb]:...
+```
+
+The out-of-line `notes` value is not in the WAL at all; the consumer receives
+a placeholder and has to keep the value it already holds (docs/sources.md:
+pg-toast, artie-postgres). The native subscriber does: after event 06 the 25
+updated rows had `field_report` set and `notes` identical to the source
+(`md5(string_agg(notes))` over those rows: `bb611da0c28ba2dea177a15e208f613d`
+on both sides), and `verify.py`, whose checksum includes `notes`, passed after
+every event with the stream's observation updates running throughout (10 such
+updates in that run, zero subscriber errors). What Artie does with the same
+rows is recorded in docs/artie-run.md.
 
 ## Things that looked wrong and are not
 
