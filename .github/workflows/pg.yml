@@ -159,3 +159,25 @@ jobs:
         if: always()
         working-directory: pg
         run: docker compose -p terra-qs down --volumes --remove-orphans
+
+  first-run:
+    name: Stranger test, pg/first_run.sh with no flags and no env
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Run the README commands exactly as written
+        run: pg/first_run.sh
+
+      - name: Print logs after failure
+        if: failure()
+        working-directory: pg
+        run: |
+          cat /tmp/first_run_stream.log || true
+          docker compose -p terra logs subscriber
+
+      - name: Remove volumes
+        if: always()
+        working-directory: pg
+        run: docker compose -p terra down --volumes --remove-orphans
