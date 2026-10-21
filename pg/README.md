@@ -28,15 +28,33 @@ Ports: the source is on `localhost:5432` (all interfaces, since Artie has to rea
 
 ## What you will see
 
-Full detail with log lines is in [docs/events-observed.md](../docs/events-observed.md). The short version, from running the sequence on 2026-10-20:
+Two consumers have run the full sequence: the Postgres subscriber that ships
+in `docker-compose.yml` (every run, in CI) and a real Artie pipeline to
+Snowflake, once, on 2026-10-21 (docs/artie-run.md). The table says what each
+did. Nothing in the right column is a general claim about Artie; it is what
+one run showed, and docs/artie-run.md has the timestamps.
 
-- `verify.py` prints one line per table: source rows, subscriber rows, column count, and `ok` or what differs. It passes after every event when `apply.sh` is allowed to touch the subscriber, and the subscriber logs no errors.
-- The subscriber needs DDL typed in by hand for every event. That is what `events/subscriber/` is. Logical replication copies rows, not schema; a replica cannot infer a new column from the rows that carry it. This is the gap a CDC tool fills, and it is why the subscriber is a stand-in, not a substitute, for a pipeline.
-- Event 06 is also the TOAST case. Its UPDATE sets `field_report` on 25 rows whose `notes` are stored out of line and leaves `notes` alone, so the WAL carries no `notes` value for them; the consumer has to keep what it has. `stream.py` does the same about once a second by moving an observation to another watering hole. `verify.py` checksums `notes`, so a consumer that dropped or nulled them fails.
-- Events 05 (rename) and 08 (drop) are done in two steps on the subscriber: first make it accept both the old and the new row shape, then, after `apply.sh` has confirmed the subscriber applied everything that committed before the event, drop the old column. If you rename on both sides at the same moment while rows are in flight, replication stops for good with `missing replicated column: "name"`; docs/events-observed.md shows that happening and why.
-- If you run `SUB_DSN=none events/apply.sh all`, so the subscriber gets no DDL, replication stops at event 01 and never recovers on its own. The worker fails on the same transaction every 5 seconds, nothing later is applied for any table, and the slot keeps WAL on the source until you fix the subscriber or drop the slot.
-- `stream.py` may print one failed tick during event 08. It reads the schema at the start of each tick and the column drop landed inside one. The batch was never committed; it resyncs and continues.
+| | subscriber stand-in (docs/events-observed.md) | Artie, one run (docs/artie-run.md) |
+| --- | --- | --- |
+| `verify.py` | passes after every event, zero subscriber errors, full checksum | columns and row counts checked through the Artie MCP; three of four tables matched exactly, `verify.py` itself could not run (no `snowsql` here) |
+| 01 add column | column added on the subscriber first; next row fits | `WEIGHT_KG NUMBER(6,2)` appeared on the next flush |
+| 02 enum value | label added on the subscriber first | `SPECIES` is VARCHAR, nothing to do |
+| 03 int to bigint | widened on the subscriber first | already `NUMBER(38,0)`, nothing to do |
+| 04 new table | `CREATE TABLE` then `REFRESH PUBLICATION`, which copies existing rows | not picked up on its own; added to the pipeline by hand and backfilled; rows written between the backfill snapshot and the end of the deploy were not forwarded (107 of 1420) |
+| 05 rename | both columns during catch-up, then `name` dropped by `apply.sh`; renaming both sides at once stalls replication for good | both `NAME` and `DISPLAY_NAME` stay; `NAME` is frozen |
+| 06 jsonb column and the TOAST case | column added first; the 25 out-of-line `notes` arrived byte-identical | `FIELD_REPORT VARIANT` appeared; whether `NOTES` survived the UPDATE cannot be read through the MCP |
+| 07 NOT NULL DEFAULT column | column added first | `ELEVATION_M NUMBER(38,0)`, nullable, no default |
+| 08 drop column | `status` made nullable first, dropped after catch-up | `STATUS` stays, frozen |
+| lag | 1 to 3 s | 30 s flush interval, 0.6 to 3.5 s reported latency |
+| what it needs from you | the DDL in `events/subscriber/`, applied by `apply.sh` | nothing for columns; a table added to the pipeline before writing to it |
+
+Things that look wrong and are not, on the subscriber side:
+
 - `verify.py` usually needs two or three attempts right after an event. The subscriber runs a second or two behind the writer.
+- `stream.py` may print one failed tick during event 08. It reads the schema at the start of each tick and the column drop landed inside one. The batch was never committed; it resyncs and continues.
+- If you run `SUB_DSN=none events/apply.sh all` with the subscriber attached, so it gets no DDL, replication stops at event 01 and never recovers on its own. The worker fails on the same transaction every 5 seconds, nothing later is applied for any table, and the slot keeps WAL on the source until you fix the subscriber or drop the slot. Detach the subscriber first (`docker compose rm -sf subscriber`, then drop its slot) when something else is the consumer.
+
+Event 06 is also the TOAST case. Its UPDATE sets `field_report` on 25 rows whose `notes` are stored out of line and leaves `notes` alone, so the WAL carries no `notes` value for them (`notes[text]:unchanged-toast-datum` in a `test_decoding` peek); the consumer has to keep what it has. `stream.py` does the same about once a second by moving an observation to another watering hole. `verify.py` checksums `notes`, so a consumer that dropped or nulled them fails.
 
 ## Connect Artie
 
@@ -68,7 +86,7 @@ For a steadier demo, run this directory on a small VM and allow inbound `5432` o
 
 ### Create the source
 
-Create a PostgreSQL source using the host, port, `artie` credentials, and database `terra`. Set the publication to `dbz_publication`. Artie creates its own replication slot. The publication is `FOR ALL TABLES`, which is what Artie's Postgres page asks for (`artie-postgres` in sources.md).
+Create a PostgreSQL source using the host, port, `artie` credentials, and database `terra`. Set the publication to `dbz_publication`. Artie creates its own replication slot. The publication is `FOR ALL TABLES`, which is what Artie's Postgres page asks for (`artie-postgres` in sources.md). Two things the 2026-10-21 run hit on the first deploy (docs/artie-run.md): the source reader's "publish partitioned table changes via partition root" setting defaults to on and must be turned off to match this publication, and a Postgres or Snowflake destination schema that does not exist yet is created only if "dynamically create namespaces" is on.
 
 Once validated, Artie backfills `watering_holes`, `animals`, and `observations`, then streams changes. Run `stream.py` and the events exactly as above; `verify.py` has a `--dest-type snowflake` and `--dest-type bigquery` mode for the destination, see "Verify".
 

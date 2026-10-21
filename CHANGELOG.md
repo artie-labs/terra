@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+Verification pass over v0.1 (docs/audit.md, docs/artie-run.md).
+
+- Audit of every claim in the repo against its sources and its own output: 11 checks, 5 failed, all fixed in one commit each.
+- `pg/bench.txt` re-measured: the image pull now dominates (156 s of 163 s); both measurements are on the file's comment lines and the README says 3 minutes.
+- Event 06 is explicitly the TOAST case: it updates 25 out-of-line rows without touching `notes`, and `stream.py` does the same continuously. A `test_decoding` peek in docs/events-observed.md shows the WAL omitting the value.
+- Artie's enum support (changelog, September 2025) and the glossary's "column type changes" are cited in docs/events-expected.md instead of "not documented".
+- docs/artie-run.md: the first run against a real Artie pipeline (Snowflake), through the Artie MCP. All eight events, columns and counts per event, the one gap found (rows written between a new table's backfill snapshot and the end of its deploy), and every create or delete call with its time. pg/README.md "What you will see" now has a subscriber column and an Artie column.
+- `pg/first_run.sh`: the stranger test. Runs the README's three commands exactly as written and prints one line; CI runs it as its own job.
+- CITATION.cff no longer carries a release date until the release exists.
+
 ## v0.1.0 (unreleased)
 
 First release of the Postgres dataset as a runnable demo rather than a seed.

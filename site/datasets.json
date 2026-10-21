@@ -6,7 +6,7 @@
     "source_db": "PostgreSQL 16, logical replication",
     "capability": "Schema evolution under a live write stream",
     "hook": "A watering-hole database that never stops changing, eight schema changes you apply on purpose, and a verifier that tells you whether your replica kept up.",
-    "status": "v0.1, runnable offline, not yet verified against a hosted destination",
+    "status": "v0.1, runnable offline; run once against an Artie pipeline to Snowflake on 2026-10-21 (docs/artie-run.md)",
     "repo_url": "https://github.com/artie-labs/terra/tree/master/pg",
     "bench_file": "../pg/bench.txt",
     "recording": "recordings/pg-safari.cast",
