@@ -9,6 +9,8 @@ Verification pass over v0.1 (docs/audit.md, docs/artie-run.md).
 - Event 06 is explicitly the TOAST case: it updates 25 out-of-line rows without touching `notes`, and `stream.py` does the same continuously. A `test_decoding` peek in docs/events-observed.md shows the WAL omitting the value.
 - Artie's enum support (changelog, September 2025) and the glossary's "column type changes" are cited in docs/events-expected.md instead of "not documented".
 - docs/artie-run.md: the first run against a real Artie pipeline (Snowflake), through the Artie MCP. All eight events, columns and counts per event, the one gap found (rows written between a new table's backfill snapshot and the end of its deploy), and every create or delete call with its time. pg/README.md "What you will see" now has a subscriber column and an Artie column.
+- docs/artie-run.md, second run: Artie writing to a Postgres destination (a schema of the source database, through the one tunnel) so `verify.py` could compare rows with its full checksum after the backfill and after every event. Six events PASS; event 03 (int to bigint) stops a Postgres destination until the tables are re-backfilled or the pipeline recreated, and widening the column by hand does not clear it; event 04 with auto-replicate on was picked up in 4.5 minutes. The TOAST case holds on Artie: 249 of 249 out-of-line notes byte-identical.
+- `pg/stream.py` counts enum labels in the `public` schema only; a same-named type in another schema (Artie created one in its destination schema) doubled the species list.
 - `pg/first_run.sh`: the stranger test. Runs the README's three commands exactly as written and prints one line; CI runs it as its own job.
 - CITATION.cff no longer carries a release date until the release exists.
 

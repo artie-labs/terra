@@ -1,7 +1,8 @@
 # Artie run
 
-Proof of v0.1 against a real Artie pipeline, driven through the Artie MCP
-server from this machine. Every MCP call that created or deleted something in
+Proof of v0.1 against real Artie pipelines, driven through the Artie MCP
+server from this machine: first to Snowflake (columns and counts through the
+MCP), then to a Postgres destination with `verify.py` after every event. Every MCP call that created or deleted something in
 the Artie account is logged in the last section with the tool name and the
 time (UTC), so the account can be audited afterwards. No passwords appear in
 this file.
@@ -221,6 +222,246 @@ event 04). This is an observation on one run, not a documented behavior.
 | lag | 1 to 3 s | 30 s flush interval; 0.6 to 3.5 s reported latency between flushes |
 | verification here | `verify.py`, full checksum | columns and counts through the MCP only |
 
+## Second run: a Postgres destination, with `verify.py` after every event
+
+Run on 2026-10-21 from 19:59Z to 22:42Z. The point of this run was the one
+thing the Snowflake run could not give: `verify.py` comparing rows, not the
+MCP reporting columns and counts. Artie wrote into schema `artie` of the
+source database itself, through the same tunnel, so `verify.py` could compare
+`public` against `artie` on localhost with its full per-row checksum. This is
+a verification trick, not a deployment pattern: the publication is
+`FOR ALL TABLES`, so Artie's own destination tables are in the publication too
+(see event 04 below).
+
+Setup. One connector served as both source and destination: the saved
+connector `21b175b9` (bore.pub:50365, role `artie_dest`), which the previous
+session had created and which `connector_list` showed at 18:39Z even though
+that `connector_create` call had been reported refused. The role was given
+`REPLICATION`, `SELECT` on `public` and `CREATE` on the database, and owned
+the empty schema `artie`. Source reader: `publishViaPartitionRoot: false`.
+Pipeline: `dynamicallyCreateNamespaces: true`, flush interval 30 s (20 s from
+21:27Z), `__artie_updated_at` on, soft deletes off. Each event was applied
+with `SUB_DSN=none events/apply.sh N` 12 s into a 45 s burst of
+`stream.py --rate 10`; once the writer stopped, `verify.py` ran with
+`--wait` until the two sides matched or the wait ran out. The command, every
+time (from `pg/`):
+
+```
+python3 verify.py --dest-type postgres \
+  --dest postgresql://postgres:...@localhost:5432/terra --dest-schema artie \
+  --allow-extra-columns --ignore-types --wait 180      # plus --exclude-columns animals.display_name from event 05 on
+```
+
+`--ignore-types` because Artie creates `timestamptz` columns as
+`timestamp with time zone` precision 6 and `numeric(6,2)` as `numeric`;
+`--allow-extra-columns` for `__artie_updated_at` and, later, the frozen
+`name` and `status`. The checksum covers every column both sides share.
+
+### After the backfill (pipeline `9205994f`, deployed 20:09Z)
+
+```
+21:01:56Z
+table            src rows   dst rows  cols  status
+animals               150        150     7  ok
+observations         1430       1430     5  ok
+watering_holes         12         12     6  ok
+verify: PASS (3 tables match, 1 attempt(s))
+```
+
+### The eight events, with the `verify.py` output
+
+| # | Event | Applied | `verify.py` | Seconds after the writer stopped |
+| --- | --- | --- | --- | ---: |
+| 01 | add column `weight_kg` | 21:02:44Z | PASS, 8 columns on `animals` | 51 |
+| 02 | enum value `pangolin` | 21:04:26Z | PASS | 71 |
+| 03 | `animal_id` int to bigint, row 3000000001 | 21:06:22Z | FAIL for 43 minutes, then PASS after a drop-and-backfill; the pipeline never streamed another wide id | see below |
+| 04 | new table `collar_pings` | 21:49:55Z | FAIL (table missing) until auto-replicate added it at 21:54:31Z; `collar_pings` 85/85 PASS at 22:11Z; `animals` and `observations` still stuck from event 03 | see below |
+| | second pipeline `bc4a360d`, created after event 03 | 22:13:30Z | PASS on all four tables, all `animal_id` columns `bigint` | backfill done 22:23Z |
+| 05 | rename `name` to `display_name` | 22:23:31Z | PASS; `display_name` added, `name` kept and frozen | 144 (first flush of a new transfer) |
+| 06 | `field_report jsonb`, 25 out-of-line rows updated | 22:36:53Z | PASS; all 249 long `notes` byte-identical | 19 |
+| 07 | `elevation_m int NOT NULL DEFAULT 0` | 22:38:07Z | PASS; destination column nullable, no default | 28 |
+| 08 | drop `status` | 22:39:28Z | PASS; `status` kept and frozen | 25 |
+
+Events 01 and 02, as printed:
+
+```
+event 1: writer started 21:02:32Z, applied at 21:02:44Z, writer stopped 21:03:17Z
+stream: stopped after 45 ticks  totals obs+272 obs~48 obs-38 animal+21 animal~71 ping+0
+table            src rows   dst rows  cols  status
+animals               171        171     8  ok
+observations         1664       1664     5  ok
+watering_holes         12         12     6  ok
+verify: PASS (3 tables match, 21 attempt(s))        exit 0 at 21:04:08Z
+
+event 2: applied at 21:04:26Z, writer stopped 21:04:59Z
+table            src rows   dst rows  cols  status
+animals               188        188     8  ok
+observations         1900       1900     5  ok
+watering_holes         12         12     6  ok
+verify: PASS (3 tables match, 29 attempt(s))        exit 0 at 21:06:10Z
+```
+
+### Event 03 on a Postgres destination: the pipeline stops
+
+Artie created `artie.animals.animal_id` and `artie.observations.animal_id`
+as `integer` at backfill time (the source type then). After the event the
+source inserted animal 3000000001, and from 21:09:06Z every flush of both
+tables failed with the same error in `pipeline_error_logs`:
+
+```
+Failed to flush table: failed to merge for "artie.animals": ... failed to prepare temporary table:
+failed to copy from rows: ERROR: COPY from stdin failed: unable to encode 3000000001 into binary
+format for int4 (OID 23): 3000000001 is greater than maximum value for int4 (SQLSTATE 57014)
+```
+
+`verify.py --wait 180` at 21:06:56Z:
+
+```
+table            src rows   dst rows  cols  status
+animals               208        188     8  checksum differs; rows 208 vs 188
+observations         2125       1900     5  checksum differs; rows 2125 vs 1900
+watering_holes         12         12     6  ok
+verify: FAIL (2 of 3 tables differ, 73 attempt(s))  at 21:09:57Z
+```
+
+The destination counts froze at the event 02 numbers. What was tried, in
+order, each followed by `verify.py --wait 240` or longer; the error kept
+repeating every one to two minutes throughout:
+
+| time | action | effect |
+| --- | --- | --- |
+| 21:10:41Z | `ALTER TABLE artie.animals ALTER COLUMN animal_id TYPE bigint` (and observations) by hand | none; same error at 21:11:48Z and after. Artie's temporary table still used int4 |
+| 21:15:10Z | `pipeline_start` | nothing to deploy, `lastDeployedAt` unchanged |
+| 21:20:48Z | `pipeline_update_status` "transfer paused", 21:21:01Z "running" | `lastDeployedAt` moved, but Artie's four sessions on the database (reader from 20:05Z, writer from 20:20Z) stayed connected; same error |
+| 21:26:50Z | flush interval 30 to 20 s, `pipeline_start` 21:27:05Z | deploy recorded 21:26:58Z; sessions unchanged; same error |
+| 21:32:54Z | `pg_terminate_backend` on all four sessions | reconnected within 9 s; same error at 21:35:45Z |
+| 21:37:10Z | `pipeline_backfill_tables`, `beforeBackfill: drop_table`, both tables | queued for 12 minutes; tables dropped and recreated with `bigint`; `verify.py` PASS at 21:49:30Z (208/2125/12, 1 attempt) |
+
+Then, during event 04, the writer inserted animals 3000000002 onward and the
+error returned at 22:08:31Z with `3000000008`, `3000000007`, `3000000006`:
+the backfill path wrote the wide ids, the CDC path still encoded the column
+as int4. Nothing else was flushed to those two tables for the rest of that
+pipeline's life. A pipeline created after the event (`bc4a360d`, 22:13Z)
+captured `bigint` and streamed 106 wide animals and 152 observations
+referencing them without an error. So on a Postgres destination the widening
+is a re-sync event: drop and backfill, or a new pipeline, not an `ALTER` on
+the destination. docs/events-expected.md said this case was undocumented;
+this is what it does.
+
+### Event 04: auto-replicate, and what it picks up in the same database
+
+`autoReplicateNewTables` was on. The table created at 21:49:55Z was not in
+the pipeline at 21:53:31Z (`verify.py`: `collar_pings  85  -  missing on
+destination`). `pipeline_detect_schema_changes` at 21:54:12Z returned
+`success`; at 21:54:31Z the pipeline gained four tables: `public.collar_pings`,
+and `artie.animals`, `artie.observations`, `artie.watering_holes` with
+destination names `artie_animals` and so on, because Artie's own destination
+tables are in the `FOR ALL TABLES` publication of this same database. They
+were removed with `pipeline_update` at 22:00:03Z (auto-replicate off from
+then), deployed 22:00:12Z; the new reader and transfer connected at 22:06:01Z.
+`verify.py` at 22:11:52Z:
+
+```
+table            src rows   dst rows  cols  status
+animals               226        208     8  checksum differs; rows 226 vs 208
+collar_pings           85         85     7  ok
+observations         2293       2125     5  checksum differs; rows 2293 vs 2125
+watering_holes         12         12     6  ok
+verify: FAIL (2 of 4 tables differ, 115 attempt(s))
+```
+
+The new table matched; the two from event 03 were stuck as described. When
+Artie recreated `artie.animals` during the drop-and-backfill it also created
+an enum type `artie.animal_species` (16 labels) in the destination schema,
+while the recreated column kept using `public.animal_species`. `stream.py`
+counted enum labels by type name without a schema and printed "32 species";
+it now filters on the `public` namespace.
+
+### The second pipeline and events 05 to 08
+
+Pipeline `9205994f` deleted 22:12:46Z, Artie's slot dropped, schema `artie`
+dropped and recreated empty. Pipeline `bc4a360d` created 22:13:00Z from the
+same connector with the four tables, flush 20 s, auto-replicate off; started
+22:13:30Z. The reader logged `replication slot "artie" is active for PID
+63036` three times between 22:22:58Z and 22:23:19Z (two reader instances
+during the rollout) and was streaming at 22:23:44Z. Backfill snapshot
+22:23:07Z, tables `streaming` 22:26:03Z, deploy finished 22:26:27Z.
+
+```
+second pipeline bc4a360d: four destination tables present at 22:23:08Z
+table            src rows   dst rows  cols  status
+animals               226        226     8  ok
+collar_pings           85         85     7  ok
+observations         2293       2293     5  ok
+watering_holes         12         12     6  ok
+verify: PASS (4 tables match, 1 attempt(s))         22:23:09Z
+artie.animals|bigint   artie.collar_pings|bigint   artie.observations|bigint
+```
+
+Event 05 (applied 22:23:31Z): two `--wait 300` runs found nothing flushed,
+because the transfer made its first destination connection only at
+22:36:02Z, ten minutes after the deploy finished. Third run:
+
+```
+table            src rows   dst rows  cols  status
+animals               244        244     8  ok (excluded from checksum: display_name; extra on destination: name)
+collar_pings          176        176     7  ok
+observations         2425       2425     5  ok
+watering_holes         12         12     7  ok
+verify: PASS (4 tables match, 79 attempt(s))        22:36:28Z
+```
+
+Events 06, 07, 08, each a PASS within 30 s of the writer stopping:
+
+```
+event 6: applied at 22:36:53Z, writer stopped 22:37:27Z
+table            src rows   dst rows  cols  status
+animals               268        268     8  ok (excluded from checksum: display_name; extra on destination: name)
+collar_pings          266        266     7  ok
+observations         2559       2559     6  ok
+watering_holes         12         12     6  ok
+verify: PASS (4 tables match, 8 attempt(s))         exit 0 at 22:37:46Z
+long_notes 249, same_md5 249, with_report 182, same_report 182   (public vs artie, joined on observation_id)
+
+event 7: applied at 22:38:07Z, writer stopped 22:38:40Z
+table            src rows   dst rows  cols  status
+animals               289        289     8  ok (excluded from checksum: display_name; extra on destination: name)
+collar_pings          366        366     7  ok
+observations         2715       2715     6  ok
+watering_holes         12         12     7  ok
+verify: PASS (4 tables match, 11 attempt(s))        exit 0 at 22:39:08Z
+artie.elevation_m  integer  nullable, no default     public.elevation_m  integer  NOT NULL DEFAULT 0
+
+event 8: applied at 22:39:28Z, writer stopped 22:40:01Z
+table            src rows   dst rows  cols  status
+animals               313        313     7  ok (excluded from checksum: display_name; extra on destination: name, status)
+collar_pings          456        456     7  ok
+observations         2854       2854     6  ok
+watering_holes         12         12     7  ok
+verify: PASS (4 tables match, 10 attempt(s))        exit 0 at 22:40:26Z
+artie.animals:  animal_id, name, species, home_watering_hole_id, status, created_at, updated_at, weight_kg, __artie_updated_at, display_name
+public.animals: animal_id, display_name, species, home_watering_hole_id, created_at, updated_at, weight_kg
+```
+
+Final state at 22:40:52Z: 106 animals above the int4 range on both sides,
+152 destination observations referencing them, `display_name` filled on 199
+of 313 destination rows (the rows touched since the rename), slot lag 111 kB.
+`pipeline_usage` for `bc4a360d` (22:13Z to 22:41Z): animals 540 rows,
+collar_pings 456, observations 3443, watering_holes 25, latency about 41 s.
+Its error log held only the three slot-conflict lines from the rollout.
+
+What this run adds to the Snowflake run's table in pg/README.md: the checksum
+holds for every event that Artie handles, the TOAST case holds on Artie
+(249 of 249), and event 03 is a stop on a Postgres destination. Lag on the
+Postgres destination: with a 20 s flush interval, a match 19 to 51 s after
+the writer stopped; a freshly deployed transfer took 6 to 10 minutes before
+its first flush, both times.
+
+Cleanup: `pipeline_delete bc4a360d` and `connector_delete 21b175b9` at
+22:41Z; Artie's sessions terminated and the `artie` slot dropped at 22:42:12Z
+(`pg_replication_slots` empty); tunnel closed and `docker compose down -v` at
+22:42:14Z. `connector_list` afterwards shows no terra connector of any kind.
+
 ## MCP calls that created or deleted something (UTC, 2026-10-21)
 
 | time | tool | object |
@@ -242,6 +483,25 @@ event 04). This is an observation on one run, not a documented behavior.
 | 16:38:04 | `connector_delete` | `9de77e08-...` and `c28f50be-...` |
 | 16:40:23 | psql on the source | Artie's `artie` slot terminated and dropped; `pg_replication_slots` empty |
 | 16:40:23 | shell | bore tunnel closed; 16:41 `docker compose down -v` |
+| 16:57:18 | `connector_create` | destination connector `21b175b9-cb4c-4d96-96a4-d7cce91bde81` (bore.pub:50365, role `artie_dest`); the call was reported refused but had completed, found by `connector_list` at 18:39 |
+| 18:43:12 | `pipeline_create_from_source` | pipeline `9205994f-bac0-4e85-a7cd-2222164d17a2` from connector `21b175b9` (draft) |
+| 18:43:42 | `pipeline_update` | destination `21b175b9`, schema `artie`, three tables, auto-replicate on |
+| 18:44:02 | `source_reader_update` | `publishViaPartitionRoot: false` |
+| 19:59:45 | `pipeline_start` | deploy; backfill done 20:08:58 |
+| 21:15:10 | `pipeline_start` | no-op (nothing undeployed) |
+| 21:20:48 | `pipeline_update_status` | transfer paused; 21:21:01 running |
+| 21:26:50 | `pipeline_update` | flush interval 20 s; 21:27:05 `pipeline_start` |
+| 21:37:10 | `pipeline_backfill_tables` | `animals`, `observations`, `drop_table` |
+| 21:54:12 | `pipeline_detect_schema_changes` | success; auto-replicate added four tables at 21:54:31 |
+| 22:00:03 | `pipeline_update` | the three `artie.*` tables removed, auto-replicate off; 22:00:12 `pipeline_start` |
+| 22:12:46 | `pipeline_delete` | pipeline `9205994f-...` |
+| 22:12:59 | psql on the source | Artie's `artie` slot dropped; schema `artie` dropped and recreated |
+| 22:13:00 | `pipeline_create_from_source` | pipeline `bc4a360d-dea4-4f73-917d-9b60cdc383f0` from connector `21b175b9` |
+| 22:13:23 | `pipeline_update` | destination `21b175b9`, four tables, flush 20 s; 22:13:24 `source_reader_update`; 22:13:30 `pipeline_start` |
+| 22:41:05 | `pipeline_delete` | pipeline `bc4a360d-...` |
+| 22:41:05 | `connector_delete` | `21b175b9-...` |
+| 22:42:12 | psql on the source | Artie's `artie` slot dropped; `pg_replication_slots` empty |
+| 22:42:14 | shell | bore tunnel closed; `docker compose down -v` |
 
 Second session of attempts, 16:53Z to 16:56Z, trying to give `verify.py` a
 Postgres destination it can read (Artie writing into schema `artie` of the
@@ -249,10 +509,13 @@ source database through the same tunnel): `unsaved_connector_ping`
 (destination role) succeeded; `connector_create` for the source made
 `6f384500-8c3c-4935-95c3-64e9274f8b15` at 16:54:23Z;
 `pipeline_create_from_source` made `fa91e8c6-f5af-4f5c-9f8b-d2972d954ea1` at
-16:54:45Z; `connector_create` for the destination was refused by the
-session's permission classifier. Both objects were deleted at 16:55Z
-(`pipeline_delete`, `connector_delete`), the tunnel closed, the stack
-destroyed; `pg_replication_slots` was empty throughout (no reader ran).
+16:54:45Z; `connector_create` for the destination was reported refused by the
+session's permission classifier, but the call had completed server-side
+(connector `21b175b9`, 16:57:18Z, found later). The pipeline and the source
+connector were deleted at 16:55Z (`pipeline_delete`, `connector_delete`),
+the tunnel closed, the stack destroyed; `pg_replication_slots` was empty
+throughout (no reader ran). That surviving connector is what the second run
+above used as both source and destination.
 
 Not deleted: the Snowflake schema `WILLIAM_TEST.TERRA_V01_TMP` and its eight
 tables (four data, four `___ARTIE_` staging). The MCP has no tool to drop a

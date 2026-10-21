@@ -29,24 +29,25 @@ Ports: the source is on `localhost:5432` (all interfaces, since Artie has to rea
 ## What you will see
 
 Two consumers have run the full sequence: the Postgres subscriber that ships
-in `docker-compose.yml` (every run, in CI) and a real Artie pipeline to
-Snowflake, once, on 2026-10-21 (docs/artie-run.md). The table says what each
+in `docker-compose.yml` (every run, in CI) and real Artie pipelines, on
+2026-10-21, once to Snowflake and once to a Postgres destination with
+`verify.py` after every event (docs/artie-run.md). The table says what each
 did. Nothing in the right column is a general claim about Artie; it is what
-one run showed, and docs/artie-run.md has the timestamps.
+those runs showed, and docs/artie-run.md has the timestamps.
 
-| | subscriber stand-in (docs/events-observed.md) | Artie, one run (docs/artie-run.md) |
+| | subscriber stand-in (docs/events-observed.md) | Artie, two runs (docs/artie-run.md) |
 | --- | --- | --- |
-| `verify.py` | passes after every event, zero subscriber errors, full checksum | columns and row counts checked through the Artie MCP; three of four tables matched exactly, `verify.py` itself could not run (no `snowsql` here) |
+| `verify.py` | passes after every event, zero subscriber errors, full checksum | Snowflake: columns and counts through the MCP only (no `snowsql` here). Postgres destination: full checksum PASS after the backfill and after events 01, 02, 05, 06, 07, 08; 03 and 04 needed operator action first |
 | 01 add column | column added on the subscriber first; next row fits | `WEIGHT_KG NUMBER(6,2)` appeared on the next flush |
 | 02 enum value | label added on the subscriber first | `SPECIES` is VARCHAR, nothing to do |
-| 03 int to bigint | widened on the subscriber first | already `NUMBER(38,0)`, nothing to do |
-| 04 new table | `CREATE TABLE` then `REFRESH PUBLICATION`, which copies existing rows | not picked up on its own; added to the pipeline by hand and backfilled; rows written between the backfill snapshot and the end of the deploy were not forwarded (107 of 1420) |
+| 03 int to bigint | widened on the subscriber first | Snowflake: already `NUMBER(38,0)`. Postgres: the column stays `integer` and every flush fails on the first id above 2^31; widening it by hand, pausing, redeploying and reconnecting did not clear it, a drop-and-backfill did until the next wide id, and a pipeline created after the event ran clean |
+| 04 new table | `CREATE TABLE` then `REFRESH PUBLICATION`, which copies existing rows | auto-replicate off: not picked up; added by hand and backfilled; rows written between the backfill snapshot and the end of the deploy were not forwarded (107 of 1420). Auto-replicate on: picked up 4.5 minutes later, 85 of 85 rows matched |
 | 05 rename | both columns during catch-up, then `name` dropped by `apply.sh`; renaming both sides at once stalls replication for good | both `NAME` and `DISPLAY_NAME` stay; `NAME` is frozen |
-| 06 jsonb column and the TOAST case | column added first; the 25 out-of-line `notes` arrived byte-identical | `FIELD_REPORT VARIANT` appeared; whether `NOTES` survived the UPDATE cannot be read through the MCP |
-| 07 NOT NULL DEFAULT column | column added first | `ELEVATION_M NUMBER(38,0)`, nullable, no default |
+| 06 jsonb column and the TOAST case | column added first; the 25 out-of-line `notes` arrived byte-identical | `FIELD_REPORT VARIANT` on Snowflake; on Postgres all 249 out-of-line `notes` byte-identical after the UPDATE, checksum PASS 19 s after the writer stopped |
+| 07 NOT NULL DEFAULT column | column added first | `ELEVATION_M NUMBER(38,0)` on Snowflake, `elevation_m integer` on Postgres; nullable, no default, both times |
 | 08 drop column | `status` made nullable first, dropped after catch-up | `STATUS` stays, frozen |
-| lag | 1 to 3 s | 30 s flush interval, 0.6 to 3.5 s reported latency |
-| what it needs from you | the DDL in `events/subscriber/`, applied by `apply.sh` | nothing for columns; a table added to the pipeline before writing to it |
+| lag | 1 to 3 s | 30 s flush interval, 0.6 to 3.5 s reported latency on Snowflake; on Postgres with a 20 s flush, a checksum match 19 to 51 s after the writer stopped, and 6 to 10 minutes before a freshly deployed transfer's first flush |
+| what it needs from you | the DDL in `events/subscriber/`, applied by `apply.sh` | nothing for columns; a table added to the pipeline before writing to it, or auto-replicate; on a Postgres destination, a re-backfill or a new pipeline after an int to bigint change |
 
 Things that look wrong and are not, on the subscriber side:
 
