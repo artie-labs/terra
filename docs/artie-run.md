@@ -243,6 +243,17 @@ event 04). This is an observation on one run, not a documented behavior.
 | 16:40:23 | psql on the source | Artie's `artie` slot terminated and dropped; `pg_replication_slots` empty |
 | 16:40:23 | shell | bore tunnel closed; 16:41 `docker compose down -v` |
 
+Second session of attempts, 16:53Z to 16:56Z, trying to give `verify.py` a
+Postgres destination it can read (Artie writing into schema `artie` of the
+source database through the same tunnel): `unsaved_connector_ping`
+(destination role) succeeded; `connector_create` for the source made
+`6f384500-8c3c-4935-95c3-64e9274f8b15` at 16:54:23Z;
+`pipeline_create_from_source` made `fa91e8c6-f5af-4f5c-9f8b-d2972d954ea1` at
+16:54:45Z; `connector_create` for the destination was refused by the
+session's permission classifier. Both objects were deleted at 16:55Z
+(`pipeline_delete`, `connector_delete`), the tunnel closed, the stack
+destroyed; `pg_replication_slots` was empty throughout (no reader ran).
+
 Not deleted: the Snowflake schema `WILLIAM_TEST.TERRA_V01_TMP` and its eight
 tables (four data, four `___ARTIE_` staging). The MCP has no tool to drop a
 destination schema; it holds about 600 kB of synthetic data and can be dropped

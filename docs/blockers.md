@@ -85,6 +85,12 @@ Three routes were tried after the Snowflake run.
    the source tunnel it had allowed minutes earlier, so no connector was
    created. The stack was destroyed again.
 
+5. The same route again after the tunnel was allowed: the destination ping
+   passed and the source connector and a draft pipeline were created, but
+   `connector_create` for the destination was refused by the server-side
+   classifier with no explanation. Both objects were deleted. The remaining
+   unblock is a permission rule for that one tool.
+
 What a person with `snowsql` or the DigitalOcean credentials needs to do is
 in the PR checklist: start the stack, expose it, run the pipeline as in
 artie-run.md, and run `verify.py --dest-type snowflake --dest
