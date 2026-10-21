@@ -103,6 +103,11 @@ Five routes failed after the Snowflake run; the sixth worked.
    until the tables are re-backfilled or the pipeline recreated, and
    auto-replicate in a same-database setup picks up Artie's own tables.
 
+Decision, 2026-10-21 23:05Z: asked whether to supply Snowflake credentials
+and a dashboard-created source connector so the Snowflake path could run from
+this session, the maintainer chose to stop here and merge the PR as is, with
+the Snowflake path left on the human checklist.
+
 What remains for a person with `snowsql` or the DigitalOcean credentials is
 the Snowflake path specifically (its SQL has still never run): start the stack, expose it, run the pipeline as in
 artie-run.md, and run `verify.py --dest-type snowflake --dest
