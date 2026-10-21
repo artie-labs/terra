@@ -82,7 +82,7 @@ class Schema:
             "WHERE table_schema = 'public' "
             "UNION ALL "
             "SELECT 'enum', t.typname, e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid "
-            "WHERE t.typname = 'animal_species' ORDER BY 1, 2, 3"
+            "WHERE t.typname = 'animal_species' AND t.typnamespace = 'public'::regnamespace ORDER BY 1, 2, 3"
         )
         self.columns = {}
         self.species = []
