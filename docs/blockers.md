@@ -78,6 +78,13 @@ Three routes were tried after the Snowflake run.
 3. The DigitalOcean Postgres destination already in the account: its
    credentials are not available to this session either.
 
+4. Artie writing into a second schema of the source database itself,
+   through the one tunnel, so `verify.py` could compare `public` against
+   `artie` locally with full checksums: a writer role and schema were created
+   on the source, but the permission classifier then refused to reopen even
+   the source tunnel it had allowed minutes earlier, so no connector was
+   created. The stack was destroyed again.
+
 What a person with `snowsql` or the DigitalOcean credentials needs to do is
 in the PR checklist: start the stack, expose it, run the pipeline as in
 artie-run.md, and run `verify.py --dest-type snowflake --dest
