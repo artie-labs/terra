@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: If you use this dataset or the demo, please cite it as below.
 title: "Terra: live CDC source datasets"
 version: 0.1.0
-date-released: 2026-10-20
+# date-released is added by the person who cuts the v0.1.0 release (see CHANGELOG.md).
 license: Apache-2.0
 repository-code: https://github.com/artie-labs/terra
 url: https://artie.world
