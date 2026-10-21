@@ -2,7 +2,7 @@
 
 A synthetic African-safari database (watering holes, animals, observations) in Postgres 16 with logical replication on, a writer that never stops, and eight schema changes you apply one at a time. A second Postgres subscribes to it so you can watch what replication does with each change before you point a real pipeline at it.
 
-<!-- bench:start -->Measured end to end, from `docker compose up` on fresh volumes to `verify.py` passing against the subscriber: 29 s, so budget 1 minute (median of the runs recorded in [bench.txt](bench.txt)).<!-- bench:end -->
+<!-- bench:start -->Measured end to end, from `docker compose up` on fresh volumes to `verify.py` passing against the subscriber: 163 s, so budget 3 minutes (median of the runs recorded in [bench.txt](bench.txt)).<!-- bench:end -->
 
 ## Run it
 
@@ -32,6 +32,7 @@ Full detail with log lines is in [docs/events-observed.md](../docs/events-observ
 
 - `verify.py` prints one line per table: source rows, subscriber rows, column count, and `ok` or what differs. It passes after every event when `apply.sh` is allowed to touch the subscriber, and the subscriber logs no errors.
 - The subscriber needs DDL typed in by hand for every event. That is what `events/subscriber/` is. Logical replication copies rows, not schema; a replica cannot infer a new column from the rows that carry it. This is the gap a CDC tool fills, and it is why the subscriber is a stand-in, not a substitute, for a pipeline.
+- Event 06 is also the TOAST case. Its UPDATE sets `field_report` on 25 rows whose `notes` are stored out of line and leaves `notes` alone, so the WAL carries no `notes` value for them; the consumer has to keep what it has. `stream.py` does the same about once a second by moving an observation to another watering hole. `verify.py` checksums `notes`, so a consumer that dropped or nulled them fails.
 - Events 05 (rename) and 08 (drop) are done in two steps on the subscriber: first make it accept both the old and the new row shape, then, after `apply.sh` has confirmed the subscriber applied everything that committed before the event, drop the old column. If you rename on both sides at the same moment while rows are in flight, replication stops for good with `missing replicated column: "name"`; docs/events-observed.md shows that happening and why.
 - If you run `SUB_DSN=none events/apply.sh all`, so the subscriber gets no DDL, replication stops at event 01 and never recovers on its own. The worker fails on the same transaction every 5 seconds, nothing later is applied for any table, and the slot keeps WAL on the source until you fix the subscriber or drop the slot.
 - `stream.py` may print one failed tick during event 08. It reads the schema at the start of each tick and the column drop landed inside one. The batch was never committed; it resyncs and continues.
@@ -107,7 +108,7 @@ Each file in `events/` has a header saying what Postgres emits for it, what Arti
 | 03 | The herd outgrows int | `ALTER COLUMN animal_id TYPE bigint` on `animals` and `observations` | widen first |
 | 04 | The collars come online | `CREATE TABLE collar_pings (...)` | create the table first, `REFRESH PUBLICATION` after |
 | 05 | The naming committee | `ALTER TABLE animals RENAME COLUMN name TO display_name` | add `display_name` and make `name` nullable first; after catch-up copy and drop `name` |
-| 06 | Rangers file structured reports | `ALTER TABLE observations ADD COLUMN field_report jsonb` | add the column first |
+| 06 | Rangers file structured reports | `ALTER TABLE observations ADD COLUMN field_report jsonb`, then update 25 out-of-line rows without touching `notes` | add the column first |
 | 07 | Survey adds elevation | `ALTER TABLE watering_holes ADD COLUMN elevation_m int NOT NULL DEFAULT 0` | add the column first |
 | 08 | Status moves to the collars | `ALTER TABLE animals DROP COLUMN status` | make `status` nullable first; drop it after catch-up |
 
@@ -165,6 +166,10 @@ pg/
 ├── bench_readme.py         # keeps the number at the top of this file honest
 └── schema_svg.py           # draws the schema from information_schema
 ```
+
+## The stranger test
+
+`first_run.sh` runs the three commands above exactly as written, times them, and prints one line such as `first run: 41 seconds, verify PASS`. CI runs it as its own job, so the README path is tested by something that has never seen the repo before.
 
 ## Scope
 
