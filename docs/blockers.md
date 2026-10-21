@@ -30,8 +30,9 @@ covers this.
 
 The Artie run (docs/artie-run.md) used the account's existing Snowflake
 connector. `verify.py --dest-type snowflake` shells out to `snowsql`, which is
-not installed on this machine, and the Snowflake credentials exist only inside
-the Artie connector, which the permission mode of the session that drove the
+not installed on this machine (`brew install --cask snowflake-snowsql` runs an
+Apple installer that needs an administrator password), and the Snowflake
+credentials exist only inside the Artie connector, which the permission mode of the session that drove the
 run cannot read (`connector_detail` is refused as credential exploration). The
 destination was checked through the MCP instead: `connector_fetch_table_detail`
 for columns and row counts, `pipeline_usage` for rows processed and latency,

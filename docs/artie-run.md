@@ -119,6 +119,45 @@ Observations: the Postgres enum `animal_species` became VARCHAR; `int` and
 destination regardless of the source's NOT NULL. Artie also created three
 `<TABLE>___ARTIE_<id>` tables in the schema, its staging tables.
 
+### verify.py against the Snowflake destination, as run
+
+The command the plan asks for was run on 2026-10-21 against a fresh seed
+(the stack was rebuilt for it; the Snowflake tables still held the run's
+final state). Its full output:
+
+```
+$ python3 verify.py --dest-type snowflake --dest WILLIAM_TEST.TERRA_V01_TMP --wait 5
+Traceback (most recent call last):
+  File "/Users/shangbingjiang/code/terra/pg/verify.py", line 316, in <module>
+    main()
+  File "/Users/shangbingjiang/code/terra/pg/verify.py", line 300, in main
+    results = compare_once(source, dest, args.dest_type, tables, allow_extra, args.ignore_types, exclude, args.no_checksum)
+  File "/Users/shangbingjiang/code/terra/pg/verify.py", line 192, in compare_once
+    dst_cols = dest.columns(table)
+  File "/Users/shangbingjiang/code/terra/pg/verify.py", line 138, in columns
+    rows = self.query(
+  File "/Users/shangbingjiang/code/terra/pg/verify.py", line 133, in query
+    out = run(["snowsql", "-o", "friendly=false", "-o", "header=false", "-o", "timing=false",
+  File "/Users/shangbingjiang/code/terra/pg/verify.py", line 58, in run
+    result = subprocess.run(cmd, input=stdin, text=True, capture_output=True)
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 505, in run
+    with Popen(*popenargs, **kwargs) as process:
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 951, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1821, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: 'snowsql'
+exit=1
+```
+
+`snowsql` is not installed: the Homebrew cask runs an Apple installer that
+needs an administrator password, which this session cannot supply, and the
+Snowflake credentials exist only inside the Artie connector. So the
+Snowflake path of `verify.py` reached the CLI boundary and stopped there; it
+has still never compared a row. The columns and counts in the tables below
+came from the MCP. Item 4 of the hand-off checklist (a person with `snowsql`
+and the credentials) is what closes this.
+
 ## The eight events against Artie
 
 `stream.py --rate 10` ran from 16:10:52Z to 16:33:52Z (1373 batches, zero
